@@ -87,7 +87,11 @@ export class DatabaseService {
         is_audio_only INTEGER NOT NULL DEFAULT 0,
         is_playlist INTEGER NOT NULL DEFAULT 0,
         playlist_title TEXT,
-        playlist_index INTEGER
+        playlist_index INTEGER,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        speed_limit TEXT,
+        error_category TEXT,
+        error_details_json TEXT
       );
 
       CREATE TABLE IF NOT EXISTS history (
@@ -117,6 +121,22 @@ export class DatabaseService {
         created_at TEXT NOT NULL
       );
     `);
+
+    // Safe backwards-compatible migrations on existing database files
+    const migrations = [
+      'ALTER TABLE jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;',
+      'ALTER TABLE jobs ADD COLUMN speed_limit TEXT;',
+      'ALTER TABLE jobs ADD COLUMN error_category TEXT;',
+      'ALTER TABLE jobs ADD COLUMN error_details_json TEXT;',
+    ];
+
+    for (const sql of migrations) {
+      try {
+        this.sqlDb.run(sql);
+      } catch {
+        // Column already exists, safe to ignore
+      }
+    }
   }
 
   public persist(): void {
@@ -130,14 +150,28 @@ export class DatabaseService {
   }
 
   /**
-   * On application restart, reconcile jobs that were marked 'downloading' or 'processing'
+   * On application restart, reconcile jobs that were left in active/running states
    */
   public reconcileStartupJobs(): void {
     try {
+      const shutdownError = JSON.stringify({
+        category: 'cancelled',
+        titleEn: 'Interrupted by Application Shutdown',
+        titleAr: 'تمت المقاطعة بسبب إغلاق البرنامج',
+        explanationEn: 'The download was in progress when the application was closed. You can resume or retry it.',
+        explanationAr: 'كان التنزيل قيد التقدم عند إغلاق التطبيق. يمكنك استئنافه أو إعادة المحاولة.',
+        suggestedActionEn: 'Click Retry or Resume to continue downloading.',
+        suggestedActionAr: 'انقر على إعادة المحاولة أو استئناف لمتابعة التنزيل.',
+        isTransient: true,
+      });
+
       this.sqlDb.run(`
         UPDATE jobs
-        SET status = 'failed', error_message = 'Interrupted by application shutdown'
-        WHERE status IN ('downloading', 'processing')
+        SET status = 'failed',
+            error_message = 'Interrupted by application shutdown',
+            error_category = 'cancelled',
+            error_details_json = '${shutdownError.replace(/'/g, "''")}'
+        WHERE status IN ('downloading', 'processing', 'merging', 'analyzing', 'preparing', 'retrying')
       `);
       this.persist();
     } catch (err) {
@@ -147,8 +181,13 @@ export class DatabaseService {
 
   // --- Jobs ---
 
+  // --- Jobs ---
+
   public saveJob(job: DownloadJob): void {
     const existing = this.getJob(job.id);
+    const errorDetailsJson = job.errorDetails ? JSON.stringify(job.errorDetails) : null;
+    const errorCategory = job.errorDetails?.category || null;
+
     if (existing) {
       this.db.update(jobsTable).set({
         sourceUrl: job.sourceUrl,
@@ -173,6 +212,10 @@ export class DatabaseService {
         isPlaylist: job.isPlaylist ? 1 : 0,
         playlistTitle: job.playlistTitle || null,
         playlistIndex: job.playlistIndex || null,
+        retryCount: job.retryCount || 0,
+        speedLimit: job.speedLimit || null,
+        errorCategory,
+        errorDetailsJson,
       }).where(eq(jobsTable.id, job.id)).run();
     } else {
       this.db.insert(jobsTable).values({
@@ -200,6 +243,10 @@ export class DatabaseService {
         isPlaylist: job.isPlaylist ? 1 : 0,
         playlistTitle: job.playlistTitle || null,
         playlistIndex: job.playlistIndex || null,
+        retryCount: job.retryCount || 0,
+        speedLimit: job.speedLimit || null,
+        errorCategory,
+        errorDetailsJson,
       }).run();
     }
     this.persist();
@@ -216,6 +263,13 @@ export class DatabaseService {
     return rows.map((r) => this.mapJobRow(r));
   }
 
+  public findJobByUrl(url: string): DownloadJob | null {
+    if (!url) return null;
+    const clean = url.trim().toLowerCase();
+    const all = this.getAllJobs();
+    return all.find((j) => j.sourceUrl.trim().toLowerCase() === clean) || null;
+  }
+
   public deleteJob(id: string): void {
     this.db.delete(jobsTable).where(eq(jobsTable.id, id)).run();
     this.persist();
@@ -227,31 +281,41 @@ export class DatabaseService {
   }
 
   private mapJobRow(row: any): DownloadJob {
+    let errorDetails;
+    if (row.errorDetailsJson || row.error_details_json) {
+      try {
+        errorDetails = JSON.parse(row.errorDetailsJson || row.error_details_json);
+      } catch {}
+    }
+
     return {
       id: row.id,
-      sourceUrl: row.sourceUrl,
-      sourcePlatform: row.sourcePlatform,
-      mediaTitle: row.mediaTitle,
-      thumbnailUrl: row.thumbnailUrl || undefined,
-      mediaDuration: row.mediaDuration || undefined,
-      selectedFormat: row.selectedFormat,
-      selectedQuality: row.selectedQuality,
+      sourceUrl: row.sourceUrl || row.source_url,
+      sourcePlatform: row.sourcePlatform || row.source_platform,
+      mediaTitle: row.mediaTitle || row.media_title,
+      thumbnailUrl: row.thumbnailUrl || row.thumbnail_url || undefined,
+      mediaDuration: row.mediaDuration || row.media_duration || undefined,
+      selectedFormat: row.selectedFormat || row.selected_format,
+      selectedQuality: row.selectedQuality || row.selected_quality,
       targetContainer: row.targetContainer || row.target_container || 'mp4',
-      outputPath: row.outputPath,
+      outputPath: row.outputPath || row.output_path,
       status: row.status as JobStatus,
-      progress: row.progress,
-      downloadedBytes: row.downloadedBytes,
-      totalBytes: row.totalBytes,
-      downloadSpeed: row.downloadSpeed || '',
+      progress: row.progress || 0,
+      downloadedBytes: row.downloadedBytes || row.downloaded_bytes || 0,
+      totalBytes: row.totalBytes || row.total_bytes || 0,
+      downloadSpeed: row.downloadSpeed || row.download_speed || '',
       eta: row.eta || '',
-      errorMessage: row.errorMessage || undefined,
-      createdAt: row.createdAt,
-      startedAt: row.startedAt || undefined,
-      completedAt: row.completedAt || undefined,
-      isAudioOnly: row.isAudioOnly === 1,
-      isPlaylist: row.isPlaylist === 1,
-      playlistTitle: row.playlistTitle || undefined,
-      playlistIndex: row.playlistIndex || undefined,
+      errorMessage: row.errorMessage || row.error_message || undefined,
+      errorDetails,
+      retryCount: row.retryCount || row.retry_count || 0,
+      speedLimit: row.speedLimit || row.speed_limit || undefined,
+      createdAt: row.createdAt || row.created_at,
+      startedAt: row.startedAt || row.started_at || undefined,
+      completedAt: row.completedAt || row.completed_at || undefined,
+      isAudioOnly: (row.isAudioOnly ?? row.is_audio_only) === 1,
+      isPlaylist: (row.isPlaylist ?? row.is_playlist) === 1,
+      playlistTitle: row.playlistTitle || row.playlist_title || undefined,
+      playlistIndex: row.playlistIndex || row.playlist_index || undefined,
     };
   }
 
@@ -276,19 +340,30 @@ export class DatabaseService {
 
   public getHistory(): DownloadHistoryEntry[] {
     const rows = this.db.select().from(historyTable).orderBy(desc(historyTable.completedAt)).all();
-    return rows.map((r) => ({
-      id: r.id,
-      jobId: r.jobId,
-      mediaTitle: r.mediaTitle,
-      sourceUrl: r.sourceUrl,
-      sourcePlatform: r.sourcePlatform,
-      filePath: r.filePath,
-      fileSize: r.fileSize,
-      format: r.format,
-      duration: r.duration,
-      thumbnailUrl: r.thumbnailUrl || undefined,
-      completedAt: r.completedAt,
-    }));
+    return rows.map((r) => {
+      const exists = r.filePath ? fs.existsSync(r.filePath) : false;
+      return {
+        id: r.id,
+        jobId: r.jobId,
+        mediaTitle: r.mediaTitle,
+        sourceUrl: r.sourceUrl,
+        sourcePlatform: r.sourcePlatform,
+        filePath: r.filePath,
+        fileSize: r.fileSize,
+        format: r.format,
+        duration: r.duration,
+        thumbnailUrl: r.thumbnailUrl || undefined,
+        completedAt: r.completedAt,
+        fileExists: exists,
+      };
+    });
+  }
+
+  public findHistoryByUrl(url: string): DownloadHistoryEntry | null {
+    if (!url) return null;
+    const clean = url.trim().toLowerCase();
+    const rows = this.getHistory();
+    return rows.find((h) => h.sourceUrl.trim().toLowerCase() === clean) || null;
   }
 
   public deleteHistory(id: string): void {
@@ -322,6 +397,12 @@ export class DatabaseService {
       downloadSubtitles: map.downloadSubtitles === 'true',
       customYtDlpPath: map.customYtDlpPath || undefined,
       customFfmpegPath: map.customFfmpegPath || undefined,
+      downloadSpeedLimit: map.downloadSpeedLimit || 'unlimited',
+      autoRetryTransient: map.autoRetryTransient !== 'false',
+      maxRetryAttempts: parseInt(map.maxRetryAttempts || '3', 10),
+      notificationsEnabled: map.notificationsEnabled !== 'false',
+      duplicateConflictPolicy: (map.duplicateConflictPolicy as any) || 'prompt',
+      clipboardMonitoring: map.clipboardMonitoring === 'true',
     };
   }
 

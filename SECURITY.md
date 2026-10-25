@@ -10,7 +10,7 @@
 
 ## 🔒 Security Architecture & Guarantees
 
-DDX Downloader is engineered with strict local-first security principles:
+Ddx Downloader is engineered with strict local-first security principles:
 1. **Context Isolation**: Enabled by default in Electron `webPreferences`.
 2. **Node Integration Disabled**: The renderer process has no direct Node.js or OS filesystem privileges.
 3. **No Shell Interpolation**: All media engine processes (yt-dlp and FFmpeg) are spawned exclusively with argument arrays using `child_process.spawn`.
@@ -21,7 +21,7 @@ DDX Downloader is engineered with strict local-first security principles:
 
 ## 🚨 Reporting a Vulnerability
 
-If you discover a security vulnerability within DDX Downloader, please **do not** open a public issue.
+If you discover a security vulnerability within Ddx Downloader, please **do not** open a public issue.
 
 Instead, please report it privately:
 - Open a GitHub Security Advisory on the repository: **Security > Advisories > Report a vulnerability**.

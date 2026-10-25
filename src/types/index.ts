@@ -52,7 +52,50 @@ export interface MediaInfo {
   subtitles: SubtitleTrack[];
 }
 
-export type JobStatus = 'queued' | 'downloading' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'paused';
+export type JobStatus =
+  | 'queued'
+  | 'analyzing'
+  | 'preparing'
+  | 'downloading'
+  | 'paused'
+  | 'processing'
+  | 'merging'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'retrying';
+
+export type ErrorCategory =
+  | 'invalid_url'
+  | 'unsupported_source'
+  | 'private_media'
+  | 'auth_required'
+  | 'geo_restricted'
+  | 'network_timeout'
+  | 'connection_interrupted'
+  | 'rate_limited'
+  | 'missing_ytdlp'
+  | 'missing_ffmpeg'
+  | 'unsupported_format'
+  | 'insufficient_space'
+  | 'permission_denied'
+  | 'cancelled'
+  | 'process_crashed'
+  | 'unknown';
+
+export interface StructuredError {
+  category: ErrorCategory;
+  titleEn: string;
+  titleAr: string;
+  explanationEn: string;
+  explanationAr: string;
+  suggestedActionEn: string;
+  suggestedActionAr: string;
+  isTransient: boolean;
+  sanitizedDetails?: string;
+  rawError?: string;
+  exitCode?: number;
+}
 
 export interface DownloadJob {
   id: string;
@@ -73,6 +116,10 @@ export interface DownloadJob {
   downloadSpeed: string;
   eta: string;
   errorMessage?: string;
+  errorDetails?: StructuredError;
+  retryCount?: number;
+  maxRetries?: number;
+  speedLimit?: string;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -95,6 +142,7 @@ export interface DownloadHistoryEntry {
   duration: number;
   thumbnailUrl?: string;
   completedAt: string;
+  fileExists?: boolean; // dynamic check for library missing file detection
 }
 
 export interface AppSettings {
@@ -109,6 +157,12 @@ export interface AppSettings {
   downloadSubtitles: boolean;
   customYtDlpPath?: string;
   customFfmpegPath?: string;
+  downloadSpeedLimit?: string; // 'unlimited' | '1M' | '3M' | '5M' | '10M' | '20M'
+  autoRetryTransient?: boolean;
+  maxRetryAttempts?: number;
+  notificationsEnabled?: boolean;
+  duplicateConflictPolicy?: 'prompt' | 'skip' | 'overwrite' | 'rename';
+  clipboardMonitoring?: boolean;
 }
 
 export interface DependencyStatusItem {
@@ -138,6 +192,9 @@ export interface CreateDownloadRequest {
   playlistIndex?: number;
   selectedSubtitles?: string[];
   embedSubtitles?: boolean;
+  speedLimit?: string;
+  downloadSubtitlesOnly?: boolean;
+  subtitleFormat?: 'srt' | 'vtt';
 }
 
 export interface PlaylistBatchDownloadRequest {
@@ -154,6 +211,29 @@ export interface PlaylistBatchDownloadRequest {
   isAudioOnly: boolean;
   container: string;
   organizeInFolder: boolean;
+  speedLimit?: string;
+}
+
+export interface MediaConversionRequest {
+  inputPath: string;
+  outputPath: string;
+  targetFormat: 'mp4' | 'mkv' | 'webm' | 'mp3' | 'm4a' | 'aac' | 'flac';
+  qualityPreset?: 'fast' | 'balanced' | 'high_quality' | 'compress';
+}
+
+export interface ConversionProgress {
+  status: 'converting' | 'completed' | 'failed' | 'cancelled';
+  percent: number;
+  speed?: string;
+  eta?: string;
+  errorMessage?: string;
+}
+
+export interface DuplicateCheckResult {
+  isDuplicate: boolean;
+  existingEntry?: DownloadHistoryEntry;
+  existingJob?: DownloadJob;
+  existingFilePath?: string;
 }
 
 export interface AppInfo {
@@ -202,6 +282,9 @@ export interface ElectronAPI {
   startPlaylistDownload: (request: PlaylistBatchDownloadRequest) => Promise<{ success: boolean; jobIds?: string[]; error?: string }>;
   cancelDownload: (jobId: string) => Promise<{ success: boolean; error?: string }>;
   retryDownload: (jobId: string) => Promise<{ success: boolean; error?: string }>;
+  retryAllFailed?: () => Promise<{ success: boolean; requeuedCount: number }>;
+  pauseDownload?: (jobId: string) => Promise<{ success: boolean; error?: string }>;
+  resumeDownload?: (jobId: string) => Promise<{ success: boolean; error?: string }>;
   getQueue: () => Promise<DownloadJob[]>;
   clearCompletedQueue: () => Promise<{ success: boolean }>;
   getHistory: () => Promise<DownloadHistoryEntry[]>;
@@ -210,14 +293,23 @@ export interface ElectronAPI {
   getSettings: () => Promise<AppSettings>;
   updateSettings: (settings: Partial<AppSettings>) => Promise<{ success: boolean; settings: AppSettings }>;
   selectDirectory: () => Promise<{ success: boolean; path?: string }>;
+  selectFileForConversion?: () => Promise<{ success: boolean; filePath?: string }>;
   checkDependencies: () => Promise<DependencyStatus>;
   openFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openFolder: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openExternal: (url: string) => Promise<{ success: boolean }>;
   getAppInfo: () => Promise<AppInfo>;
+  checkDuplicate: (url: string) => Promise<DuplicateCheckResult>;
+  checkFreeDiskSpace?: (dirPath?: string) => Promise<{ freeBytes: number; totalBytes: number }>;
+  cleanTempFiles?: () => Promise<{ success: boolean; cleanedCount: number; freedBytes: number; error?: string }>;
+  convertMedia?: (req: MediaConversionRequest) => Promise<{ success: boolean; error?: string }>;
+  cancelConversion?: () => Promise<{ success: boolean }>;
+  toggleMiniMode?: (enable: boolean) => Promise<{ success: boolean }>;
+  downloadStandaloneSubtitle?: (url: string, lang: string, format: 'srt' | 'vtt', outDir?: string, filename?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   onDownloadProgress: (callback: (job: DownloadJob) => void) => () => void;
   onQueueUpdated: (callback: (queue: DownloadJob[]) => void) => () => void;
   onDependencyStatusChanged: (callback: (status: DependencyStatus) => void) => () => void;
+  onConversionProgress?: (callback: (progress: ConversionProgress) => void) => () => void;
   // Updater
   checkForUpdates: (isManual?: boolean) => Promise<{ success: boolean; error?: string }>;
   downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
@@ -231,4 +323,5 @@ declare global {
     electronAPI: ElectronAPI;
   }
 }
+
 

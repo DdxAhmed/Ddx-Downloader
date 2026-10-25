@@ -55,9 +55,9 @@ jobs:
       - name: Verify Single Setup Executable
         shell: pwsh
         run: |
-          $setupFiles = Get-ChildItem -Path "release" -Filter "DDX-Downloader-Setup-*.exe"
+          $setupFiles = Get-ChildItem -Path "release" -Filter "Ddx-Downloader-Setup-*.exe"
           if ($setupFiles.Count -ne 1) {
-            Write-Error "Validation failed: Expected exactly 1 setup executable matching 'DDX-Downloader-Setup-*.exe', but found $($setupFiles.Count)."
+            Write-Error "Validation failed: Expected exactly 1 setup executable matching 'Ddx-Downloader-Setup-*.exe', but found $($setupFiles.Count)."
             exit 1
           }
           Write-Host "Success: Verified single setup installer -> $($setupFiles[0].Name) ($([math]::Round($setupFiles[0].Length / 1MB, 2)) MB)"
@@ -65,15 +65,15 @@ jobs:
       - name: Upload Setup Executable Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DDX-Downloader-Setup
-          path: release/DDX-Downloader-Setup-*.exe
+          name: Ddx-Downloader-Setup
+          path: release/Ddx-Downloader-Setup-*.exe
           if-no-files-found: error
 
       - name: Publish Single Setup to GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          files: release/DDX-Downloader-Setup-*.exe
+          files: release/Ddx-Downloader-Setup-*.exe
           draft: false
           prerelease: false
           generate_release_notes: true

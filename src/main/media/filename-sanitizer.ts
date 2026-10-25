@@ -3,8 +3,8 @@ import path from 'path';
 export function sanitizeFilename(name: string): string {
   if (!name) return 'media';
 
-  // Remove control characters and illegal Windows/Unix filesystem characters
-  let clean = name.replace(/[\x00-\x1f\x80-\x9f\\/:*?"<>|]/g, '_');
+  // Remove control characters and illegal Windows/Unix filesystem characters: < > : " / \ | ? *
+  let clean = name.replace(/[\x00-\x1f\\/:*?"<>|]/g, '_');
 
   // Collapse multiple spaces or underscores
   clean = clean.replace(/\s+/g, ' ').replace(/_+/g, '_').trim();
@@ -15,6 +15,12 @@ export function sanitizeFilename(name: string): string {
   // Truncate to reasonable length (prevent MAX_PATH issues on Windows)
   if (clean.length > 180) {
     clean = clean.substring(0, 180).trim();
+  }
+
+  // Handle Windows reserved DOS device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+  const reservedRegex = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+  if (reservedRegex.test(clean)) {
+    clean = `${clean}_file`;
   }
 
   return clean || 'media';

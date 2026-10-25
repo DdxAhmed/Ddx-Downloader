@@ -25,6 +25,10 @@ export const jobsTable = sqliteTable('jobs', {
   isPlaylist: integer('is_playlist').notNull().default(0),
   playlistTitle: text('playlist_title'),
   playlistIndex: integer('playlist_index'),
+  retryCount: integer('retry_count').notNull().default(0),
+  speedLimit: text('speed_limit'),
+  errorCategory: text('error_category'),
+  errorDetailsJson: text('error_details_json'),
 });
 
 export const historyTable = sqliteTable('history', {

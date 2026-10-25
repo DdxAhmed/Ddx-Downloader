@@ -1,4 +1,4 @@
-import { ipcMain, dialog, shell, BrowserWindow, app } from 'electron';
+import { ipcMain, dialog, shell, BrowserWindow, app, Notification } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { DatabaseService } from '../database';
@@ -12,7 +12,10 @@ import {
   PlaylistBatchDownloadRequest,
   DownloadJob,
   AppSettings,
+  MediaConversionRequest,
 } from '../../types';
+
+let miniWindow: BrowserWindow | null = null;
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
@@ -32,16 +35,52 @@ export function registerIpcHandlers(
     });
   }
 
-  // Connect queue events to renderer
+  // Connect queue events to renderer and OS desktop notifications
   queue.setCallbacks(
     (job) => {
       if (!mainWindow.isDestroyed()) {
         mainWindow.webContents.send('download:progress', job);
       }
+      if (miniWindow && !miniWindow.isDestroyed()) {
+        miniWindow.webContents.send('download:progress', job);
+      }
     },
     (jobs) => {
       if (!mainWindow.isDestroyed()) {
         mainWindow.webContents.send('queue:updated', jobs);
+      }
+      if (miniWindow && !miniWindow.isDestroyed()) {
+        miniWindow.webContents.send('queue:updated', jobs);
+      }
+    },
+    // On completed notification
+    (completedJob) => {
+      try {
+        const settings = db.getSettings(defaultDownloadsDir);
+        if (settings.notificationsEnabled !== false && Notification.isSupported()) {
+          new Notification({
+            title: 'Ddx Downloader — Download Completed',
+            body: `Finished: "${completedJob.mediaTitle}"`,
+            silent: false,
+          }).show();
+        }
+      } catch (err) {
+        console.error('[Notification] Failed to show completed notification:', err);
+      }
+    },
+    // On failed notification
+    (failedJob) => {
+      try {
+        const settings = db.getSettings(defaultDownloadsDir);
+        if (settings.notificationsEnabled !== false && Notification.isSupported()) {
+          new Notification({
+            title: 'Ddx Downloader — Download Failed',
+            body: `Failed: "${failedJob.mediaTitle}" (${failedJob.errorMessage || 'Error'})`,
+            silent: false,
+          }).show();
+        }
+      } catch (err) {
+        console.error('[Notification] Failed to show failed notification:', err);
       }
     }
   );
@@ -67,7 +106,9 @@ export function registerIpcHandlers(
       }
 
       const settings = db.getSettings(defaultDownloadsDir);
-      const ext = req.isAudioOnly ? (req.container || 'mp3') : (req.container || settings.preferredContainer || 'mp4');
+      const ext = req.isAudioOnly
+        ? (req.container || 'mp3')
+        : (req.container || settings.preferredContainer || 'mp4');
 
       const outputPath = buildOutputPath(settings.downloadDirectory, req.title, ext, {
         isPlaylist: !!req.playlistTitle,
@@ -77,6 +118,8 @@ export function registerIpcHandlers(
       });
 
       const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const speedLimit = req.speedLimit || settings.downloadSpeedLimit;
+
       const job: DownloadJob = {
         id: jobId,
         sourceUrl: req.url,
@@ -95,6 +138,8 @@ export function registerIpcHandlers(
         totalBytes: 0,
         downloadSpeed: '',
         eta: '',
+        speedLimit: speedLimit !== 'unlimited' ? speedLimit : undefined,
+        retryCount: 0,
         createdAt: new Date().toISOString(),
         isPlaylist: !!req.playlistTitle,
         playlistTitle: req.playlistTitle,
@@ -118,9 +163,12 @@ export function registerIpcHandlers(
       }
 
       const settings = db.getSettings(defaultDownloadsDir);
-      const ext = req.isAudioOnly ? (req.container || 'mp3') : (req.container || settings.preferredContainer || 'mp4');
+      const ext = req.isAudioOnly
+        ? (req.container || 'mp3')
+        : (req.container || settings.preferredContainer || 'mp4');
       const jobs: DownloadJob[] = [];
       const jobIds: string[] = [];
+      const speedLimit = req.speedLimit || settings.downloadSpeedLimit;
 
       for (const item of req.items) {
         const outputPath = buildOutputPath(settings.downloadDirectory, item.title, ext, {
@@ -150,6 +198,8 @@ export function registerIpcHandlers(
           totalBytes: 0,
           downloadSpeed: '',
           eta: '',
+          speedLimit: speedLimit !== 'unlimited' ? speedLimit : undefined,
+          retryCount: 0,
           createdAt: new Date().toISOString(),
           isPlaylist: true,
           playlistTitle: req.playlistTitle,
@@ -164,9 +214,19 @@ export function registerIpcHandlers(
     }
   });
 
-  // 4. Cancel & Retry
+  // 4. Cancel, Pause, Resume, and Retry
   ipcMain.handle('media:cancel', async (_event, jobId: string) => {
     const success = queue.cancelJob(jobId);
+    return { success };
+  });
+
+  ipcMain.handle('media:pause', async (_event, jobId: string) => {
+    const success = queue.pauseJob(jobId);
+    return { success };
+  });
+
+  ipcMain.handle('media:resume', async (_event, jobId: string) => {
+    const success = queue.resumeJob(jobId);
     return { success };
   });
 
@@ -175,7 +235,160 @@ export function registerIpcHandlers(
     return { success };
   });
 
-  // 5. Queue management
+  ipcMain.handle('media:retryAllFailed', async () => {
+    const count = queue.retryAllFailed();
+    return { success: true, count };
+  });
+
+  // 5. Duplicate Detection
+  ipcMain.handle('media:checkDuplicate', async (_event, url: string) => {
+    if (!url || typeof url !== 'string') {
+      return { isDuplicate: false };
+    }
+
+    const clean = url.trim().toLowerCase();
+    const existingHist = db.findHistoryByUrl(clean);
+    const existingJob = db.findJobByUrl(clean);
+
+    return {
+      isDuplicate: !!(existingHist || existingJob),
+      existingEntry: existingHist || undefined,
+      existingJob: existingJob || undefined,
+      existingFilePath: existingHist?.filePath || existingJob?.outputPath,
+    };
+  });
+
+  // 6. Standalone Subtitles Download
+  ipcMain.handle(
+    'media:downloadSubtitles',
+    async (
+      _event,
+      url: string,
+      lang: string,
+      format: 'srt' | 'vtt',
+      outDir?: string,
+      title?: string
+    ) => {
+      const settings = db.getSettings(defaultDownloadsDir);
+      const targetDir = outDir || settings.downloadDirectory;
+      const targetTitle = title || 'subtitles';
+      return mediaEngine.downloadStandaloneSubtitle(url, lang, format, targetDir, targetTitle);
+    }
+  );
+
+  // 7. Media Converter Handlers (FFmpeg)
+  ipcMain.handle('media:convert', async (_event, req: MediaConversionRequest) => {
+    try {
+      if (!req || !req.inputPath || !req.outputPath) {
+        return { success: false, error: 'Invalid conversion request.' };
+      }
+
+      await mediaEngine.convertMedia(
+        req,
+        (prog) => {
+          if (!mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('conversion:progress', prog);
+          }
+        },
+        (_out) => {
+          if (!mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('conversion:progress', {
+              status: 'completed',
+              percent: 100,
+            });
+          }
+        },
+        (err) => {
+          if (!mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('conversion:progress', {
+              status: 'failed',
+              percent: 0,
+              errorMessage: err.message,
+            });
+          }
+        }
+      );
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('media:cancelConversion', async () => {
+    const success = mediaEngine.cancelConversion();
+    return { success };
+  });
+
+  ipcMain.handle('dialog:selectFileForConversion', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Media File to Convert',
+      filters: [
+        {
+          name: 'Media Files',
+          extensions: ['mp4', 'mkv', 'webm', 'mov', 'avi', 'mp3', 'm4a', 'flac', 'wav', 'aac'],
+        },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false };
+    }
+
+    return { success: true, filePath: result.filePaths[0] };
+  });
+
+  // 8. Disk Space and Storage Operations
+  ipcMain.handle('storage:checkFreeSpace', async (_event, dirPath?: string) => {
+    try {
+      const target = dirPath || db.getSettings(defaultDownloadsDir).downloadDirectory;
+      if (fs.existsSync(target) && (fs as any).statfsSync) {
+        const stat = (fs as any).statfsSync(target);
+        return {
+          freeBytes: stat.bavail * stat.bsize,
+          totalBytes: stat.blocks * stat.bsize,
+        };
+      }
+    } catch (err) {
+      console.warn('[Storage] Could not check free space via statfsSync:', err);
+    }
+    return { freeBytes: 100 * 1024 * 1024 * 1024, totalBytes: 500 * 1024 * 1024 * 1024 };
+  });
+
+  ipcMain.handle('storage:cleanTemp', async () => {
+    try {
+      const settings = db.getSettings(defaultDownloadsDir);
+      const downloadDir = settings.downloadDirectory;
+      let cleanedCount = 0;
+      let freedBytes = 0;
+
+      if (fs.existsSync(downloadDir)) {
+        const files = fs.readdirSync(downloadDir);
+        const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;
+
+        for (const file of files) {
+          if (file.endsWith('.part') || file.endsWith('.ytdl') || file.endsWith('.temp')) {
+            const filePath = path.join(downloadDir, file);
+            try {
+              const stat = fs.statSync(filePath);
+              // Only delete stale temporary files older than 15 mins
+              if (stat.mtimeMs < fifteenMinutesAgo) {
+                freedBytes += stat.size;
+                fs.unlinkSync(filePath);
+                cleanedCount++;
+              }
+            } catch {}
+          }
+        }
+      }
+      return { success: true, cleanedCount, freedBytes };
+    } catch (err: any) {
+      return { success: false, cleanedCount: 0, freedBytes: 0, error: err.message };
+    }
+  });
+
+  // 9. Queue Management
   ipcMain.handle('queue:get', async () => {
     return queue.getQueue();
   });
@@ -185,7 +398,7 @@ export function registerIpcHandlers(
     return { success: true };
   });
 
-  // 6. History management
+  // 10. History Management
   ipcMain.handle('history:get', async () => {
     return db.getHistory();
   });
@@ -211,7 +424,7 @@ export function registerIpcHandlers(
     return { success: true };
   });
 
-  // 7. Settings management
+  // 11. Settings Management
   ipcMain.handle('settings:get', async () => {
     return db.getSettings(defaultDownloadsDir);
   });
@@ -244,12 +457,12 @@ export function registerIpcHandlers(
     return { success: true, path: result.filePaths[0] };
   });
 
-  // 8. Dependencies check
+  // 12. Dependencies Check
   ipcMain.handle('dependencies:check', async () => {
     return resolver.getStatus(true);
   });
 
-  // 9. Safe Shell operations
+  // 13. Safe Shell Operations
   ipcMain.handle('shell:openFile', async (_event, filePath: string) => {
     if (!filePath || !fs.existsSync(filePath)) {
       return { success: false, error: 'File does not exist on disk.' };
@@ -266,7 +479,6 @@ export function registerIpcHandlers(
       shell.showItemInFolder(filePath);
       return { success: true };
     } else {
-      // If file doesn't exist, try opening containing folder
       const dir = path.dirname(filePath);
       if (fs.existsSync(dir)) {
         await shell.openPath(dir);
@@ -289,7 +501,7 @@ export function registerIpcHandlers(
     }
   });
 
-  // 10. App Info
+  // 14. App Info
   ipcMain.handle('app:getInfo', async () => {
     return {
       version: app.getVersion() || '1.0.0',
@@ -299,7 +511,70 @@ export function registerIpcHandlers(
     };
   });
 
-  // 11. Auto Updater handlers
+  // 15. Mini Mode Toggle
+  ipcMain.handle('app:toggleMiniMode', async (_event, enable: boolean) => {
+    try {
+      if (enable) {
+        if (!miniWindow || miniWindow.isDestroyed()) {
+          miniWindow = new BrowserWindow({
+            title: 'Ddx Downloader — Mini Mode',
+            width: 440,
+            height: 290,
+            minWidth: 400,
+            minHeight: 260,
+            backgroundColor: '#0b0f19',
+            autoHideMenuBar: true,
+            alwaysOnTop: true,
+            frame: true,
+            webPreferences: {
+              preload: path.join(__dirname, 'preload.cjs'),
+              contextIsolation: true,
+              nodeIntegration: false,
+              sandbox: false,
+            },
+          });
+
+          const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+          const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173#mini';
+          if (isDev) {
+            try {
+              await miniWindow.loadURL(devServerUrl);
+            } catch {
+              await miniWindow.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'mini' });
+            }
+          } else {
+            await miniWindow.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'mini' });
+          }
+
+          miniWindow.on('closed', () => {
+            miniWindow = null;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.show();
+            }
+          });
+        }
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.hide();
+        }
+        miniWindow.show();
+      } else {
+        if (miniWindow && !miniWindow.isDestroyed()) {
+          miniWindow.close();
+          miniWindow = null;
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // 16. Auto Updater Handlers
   ipcMain.handle('updater:check', async (_event, isManual: boolean) => {
     if (!updateService) {
       return { success: false, error: 'Update service not initialized.' };

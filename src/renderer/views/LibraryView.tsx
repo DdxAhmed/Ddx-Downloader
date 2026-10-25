@@ -11,8 +11,12 @@ import {
   Filter,
   ArrowUpDown,
   ExternalLink,
+  Copy,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import { DownloadHistoryEntry } from '../../types';
+import { SupportedLanguage } from '../i18n';
 
 interface LibraryViewProps {
   history: DownloadHistoryEntry[];
@@ -20,6 +24,7 @@ interface LibraryViewProps {
   onOpenFolder: (filePath: string) => Promise<void>;
   onDeleteEntry: (id: string, deleteFile: boolean) => Promise<void>;
   onShowToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  lang: SupportedLanguage;
 }
 
 export const LibraryView: React.FC<LibraryViewProps> = ({
@@ -28,7 +33,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   onOpenFolder,
   onDeleteEntry,
   onShowToast,
+  lang,
 }) => {
+  const isAr = lang === 'ar';
   const [search, setSearch] = useState('');
   const [platformFilter, setPlatformFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -46,6 +53,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   };
+
+  const totalSize = history.reduce((acc, h) => acc + (h.fileSize || 0), 0);
+  const missingFilesCount = history.filter((h) => h.fileExists === false).length;
 
   const filteredHistory = history
     .filter((item) => {
@@ -81,20 +91,51 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       await onDeleteEntry(deleteModalItem.id, deleteFromDisk);
       onShowToast(
         deleteFromDisk
-          ? 'Removed entry and deleted file from disk.'
+          ? isAr
+            ? 'تم حذف السجل وإزالة الملف من القرص.'
+            : 'Removed entry and deleted file from disk.'
+          : isAr
+          ? 'تم حذف السجل من المكتبة.'
           : 'Removed entry from library.',
         'info'
       );
       setDeleteModalItem(null);
     } catch {
-      onShowToast('Failed to delete item.', 'error');
+      onShowToast(isAr ? 'فشل حذف العنصر.' : 'Failed to delete item.', 'error');
     }
+  };
+
+  const copyPath = (p: string) => {
+    navigator.clipboard.writeText(p);
+    onShowToast(isAr ? 'تم نسخ مسار الملف إلى الحافظة' : 'Copied file path to clipboard', 'success');
   };
 
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-6 animate-fadeIn">
       {/* Top Search & Filter Bar */}
       <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-4">
+        {/* Statistics Pill Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs pb-3 border-b border-slate-800/80">
+          <div className="flex items-center gap-4 text-slate-300 font-medium">
+            <span>
+              {isAr ? 'إجمالي الملفات:' : 'Total Items:'}{' '}
+              <strong className="text-white font-mono">{history.length}</strong>
+            </span>
+            <span>
+              {isAr ? 'الحجم الكلي:' : 'Total Storage:'}{' '}
+              <strong className="text-indigo-400 font-mono">{formatBytes(totalSize)}</strong>
+            </span>
+            {missingFilesCount > 0 && (
+              <span className="text-amber-400 font-semibold flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>
+                  {missingFilesCount} {isAr ? 'ملفات مفقودة أو منقولة' : 'files missing or moved'}
+                </span>
+              </span>
+            )}
+          </div>
+        </div>
+
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
@@ -102,19 +143,19 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search downloaded media by title..."
+              placeholder={isAr ? 'البحث في الوسائط المحفوظة بالعنوان...' : 'Search downloaded media by title...'}
               className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {/* Platform filter */}
             <select
               value={platformFilter}
               onChange={(e) => setPlatformFilter(e.target.value)}
               className="bg-slate-900 border border-slate-700/80 text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
             >
-              <option value="all">All Platforms</option>
+              <option value="all">{isAr ? 'جميع المنصات' : 'All Platforms'}</option>
               <option value="youtube">YouTube</option>
               <option value="instagram">Instagram</option>
               <option value="vimeo">Vimeo</option>
@@ -127,9 +168,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               onChange={(e) => setTypeFilter(e.target.value)}
               className="bg-slate-900 border border-slate-700/80 text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
             >
-              <option value="all">All Formats</option>
-              <option value="video">Videos</option>
-              <option value="audio">Audio Only</option>
+              <option value="all">{isAr ? 'جميع الصيغ' : 'All Formats'}</option>
+              <option value="video">{isAr ? 'فيديو' : 'Videos'}</option>
+              <option value="audio">{isAr ? 'صوتيات فقط' : 'Audio Only'}</option>
             </select>
 
             {/* Sort Dropdown */}
@@ -138,15 +179,15 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               onChange={(e) => setSortBy(e.target.value as any)}
               className="bg-slate-900 border border-slate-700/80 text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
             >
-              <option value="date">Sort by Date</option>
-              <option value="title">Sort by Title</option>
-              <option value="size">Sort by Size</option>
+              <option value="date">{isAr ? 'ترتيب بالتاريخ' : 'Sort by Date'}</option>
+              <option value="title">{isAr ? 'ترتيب بالاسم' : 'Sort by Title'}</option>
+              <option value="size">{isAr ? 'ترتيب بالحجم' : 'Sort by Size'}</option>
             </select>
 
             <button
-              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-              className="p-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-slate-400 hover:text-white"
-              title={`Sorting ${sortOrder === 'asc' ? 'Ascending' : 'Descending'}`}
+              onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+              className="p-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-slate-300 hover:text-white"
+              title="Toggle sort direction"
             >
               <ArrowUpDown className="w-4 h-4" />
             </button>
@@ -154,105 +195,127 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         </div>
       </div>
 
-      {/* Grid of Media Items */}
+      {/* Grid of Library Items */}
       {filteredHistory.length === 0 ? (
         <div className="glass-card rounded-2xl p-12 text-center space-y-3 border border-slate-800">
           <Film className="w-12 h-12 text-slate-600 mx-auto" />
-          <h3 className="text-base font-bold text-white">No media found</h3>
-          <p className="text-xs text-slate-400">
-            {history.length === 0
-              ? 'You have not downloaded any media yet. Complete a download to populate your library.'
-              : 'No items match your active filters.'}
+          <h3 className="text-base font-bold text-white">
+            {isAr ? 'لا توجد وسائط مطابقة' : 'No media items found'}
+          </h3>
+          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            {isAr
+              ? 'لم يتم العثور على وسائط مطابقة لمعايير البحث الحالية.'
+              : 'No completed media items matched your search query or filters.'}
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredHistory.map((item) => {
-            const isAudio =
-              item.filePath.endsWith('.mp3') || item.filePath.endsWith('.m4a');
+            const isAudio = item.filePath.endsWith('.mp3') || item.filePath.endsWith('.m4a');
+            const isMissing = item.fileExists === false;
+
             return (
               <div
                 key={item.id}
-                className="glass-card rounded-2xl overflow-hidden border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between group"
+                className="glass-card rounded-2xl p-4 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between space-y-3 group"
               >
-                {/* Thumbnail / Header */}
-                <div className="relative h-36 bg-slate-900 overflow-hidden">
-                  {item.thumbnailUrl ? (
-                    <img
-                      src={item.thumbnailUrl}
-                      alt=""
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-600">
-                      {isAudio ? <Music className="w-10 h-10" /> : <Film className="w-10 h-10" />}
-                    </div>
-                  )}
+                <div className="flex items-start gap-3.5">
+                  <div className="w-24 h-16 rounded-xl bg-slate-900 border border-slate-800 shrink-0 overflow-hidden relative">
+                    {item.thumbnailUrl ? (
+                      <img
+                        src={item.thumbnailUrl}
+                        alt=""
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-slate-600">
+                        {isAudio ? <Music className="w-6 h-6" /> : <Film className="w-6 h-6" />}
+                      </div>
+                    )}
 
-                  {/* Play Overlay Button */}
-                  <div
-                    onClick={() => onOpenFile(item.filePath)}
-                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 backdrop-blur-[2px] transition-opacity flex items-center justify-center cursor-pointer"
-                  >
-                    <div className="w-12 h-12 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-lg hover:scale-110 transition-transform">
-                      <Play className="w-5 h-5 ml-0.5" />
-                    </div>
+                    <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-mono text-white">
+                      {item.format}
+                    </span>
                   </div>
 
-                  <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 backdrop-blur-sm text-[10px] font-bold text-indigo-300 uppercase">
-                    {item.sourcePlatform}
-                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase">
+                        {item.sourcePlatform}
+                      </span>
+                      {isMissing && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-semibold flex items-center gap-1">
+                          <AlertTriangle className="w-2.5 h-2.5" />
+                          <span>{isAr ? 'ملف مفقود' : 'File Missing'}</span>
+                        </span>
+                      )}
+                    </div>
 
-                  <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 backdrop-blur-sm text-[10px] font-mono text-white">
-                    {item.format}
-                  </span>
-                </div>
-
-                {/* Info */}
-                <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
-                  <div>
                     <h4
-                      className="text-xs font-bold text-white line-clamp-2 leading-snug"
+                      className="text-xs font-bold text-white line-clamp-2 mt-1 leading-snug"
                       title={item.mediaTitle}
                     >
                       {item.mediaTitle}
                     </h4>
 
-                    <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-2 font-medium">
+                    <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-2">
                       <span className="flex items-center gap-1">
                         <HardDrive className="w-3 h-3 text-slate-500" />
-                        {formatBytes(item.fileSize)}
+                        <span>{formatBytes(item.fileSize)}</span>
                       </span>
                       <span>•</span>
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3 text-slate-500" />
-                        {new Date(item.completedAt).toLocaleDateString()}
+                        <span>{new Date(item.completedAt).toLocaleDateString()}</span>
                       </span>
                     </div>
                   </div>
+                </div>
 
-                  {/* Action Bar */}
-                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                {/* Actions Footer */}
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    {!isMissing ? (
+                      <button
+                        onClick={() => onOpenFile(item.filePath)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-all shadow-md shadow-indigo-600/20"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'تشغيل' : 'Play'}</span>
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-amber-400">
+                        {isAr ? 'الملف غير موجود بالمسار' : 'File not found on disk'}
+                      </span>
+                    )}
+
                     <button
                       onClick={() => onOpenFolder(item.filePath)}
-                      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors"
-                      title="Reveal in local folder"
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all"
+                      title={isAr ? 'عرض في المجلد' : 'Reveal in Folder'}
                     >
                       <Folder className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Reveal</span>
                     </button>
 
                     <button
-                      onClick={() => {
-                        setDeleteModalItem(item);
-                        setDeleteFromDisk(false);
-                      }}
-                      className="p-1 text-slate-500 hover:text-red-400 transition-colors"
-                      title="Remove from library"
+                      onClick={() => copyPath(item.filePath)}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all"
+                      title={isAr ? 'نسخ المسار' : 'Copy File Path'}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Copy className="w-3.5 h-3.5" />
                     </button>
                   </div>
+
+                  <button
+                    onClick={() => {
+                      setDeleteModalItem(item);
+                      setDeleteFromDisk(false);
+                    }}
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/20 transition-all"
+                    title={isAr ? 'حذف من المكتبة' : 'Remove entry'}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             );
@@ -262,38 +325,44 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
       {/* Delete Confirmation Modal */}
       {deleteModalItem && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-[#111827] border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <h3 className="text-base font-bold text-white">Remove from Library</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Are you sure you want to remove <span className="text-white font-medium">"{deleteModalItem.mediaTitle}"</span> from your library?
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-rose-500" />
+              <span>{isAr ? 'حذف من المكتبة' : 'Remove from Library'}</span>
+            </h3>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              {isAr
+                ? `هل أنت متأكد من حذف "${deleteModalItem.mediaTitle}" من سجل المكتبة؟`
+                : `Are you sure you want to remove "${deleteModalItem.mediaTitle}" from your library history?`}
             </p>
 
-            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center gap-2 text-xs">
               <input
                 type="checkbox"
-                id="deleteDisk"
+                id="deleteFromDisk"
                 checked={deleteFromDisk}
                 onChange={(e) => setDeleteFromDisk(e.target.checked)}
-                className="rounded bg-slate-800 border-slate-700 text-red-500 focus:ring-red-500"
+                className="rounded bg-slate-900 border-slate-700 text-rose-600 focus:ring-rose-500"
               />
-              <label htmlFor="deleteDisk" className="text-xs text-slate-300 cursor-pointer">
-                Also delete the actual file from your hard drive
+              <label htmlFor="deleteFromDisk" className="text-rose-300 font-medium cursor-pointer">
+                {isAr ? 'حذف الملف الفعلي من القرص الصلب نهائياً أيضاً' : 'Also delete the actual file from disk permanently'}
               </label>
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 onClick={() => setDeleteModalItem(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-800"
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:text-white"
               >
-                Cancel
+                {isAr ? 'إلغاء' : 'Cancel'}
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-red-600 hover:bg-red-500 shadow-md shadow-red-600/30"
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white"
               >
-                Confirm Remove
+                {isAr ? 'تأكيد الحذف' : 'Confirm Delete'}
               </button>
             </div>
           </div>

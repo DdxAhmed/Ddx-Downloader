@@ -1,6 +1,6 @@
-# Contributing to DDX Downloader
+# Contributing to Ddx Downloader
 
-Thank you for your interest in contributing to **DDX Downloader**! We welcome community contributions, bug reports, and feature proposals.
+Thank you for your interest in contributing to **Ddx Downloader**! We welcome community contributions, bug reports, and feature proposals.
 
 ---
 
@@ -14,8 +14,8 @@ Please treat all community members with respect, dignity, and openness. Collabor
 
 1. **Fork and Clone**:
    ```bash
-   git clone https://github.com/your-username/DdxDownloader.git
-   cd DdxDownloader
+   git clone https://github.com/DdxAhmed/Ddx-Downloader.git
+   cd Ddx-Downloader
    ```
 
 2. **Branching Model**:

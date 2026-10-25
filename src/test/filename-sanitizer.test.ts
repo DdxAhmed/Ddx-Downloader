@@ -39,4 +39,18 @@ describe('Filename Sanitizer & Path Builder', () => {
     const expected = path.join('C:/Downloads', 'Physics 101', '01 - Electric Field.mp4');
     expect(out).toBe(expected);
   });
+
+  it('preserves Arabic and Unicode text while removing forbidden characters', () => {
+    const raw = 'الدرس الأول: مقدمة في الذكاء الاصطناعي؟ <مهم>';
+    const clean = sanitizeFilename(raw);
+    expect(clean).toContain('الدرس الأول');
+    expect(clean).toContain('مقدمة في الذكاء الاصطناعي');
+    expect(clean).not.toMatch(/[\\/:*?"<>|]/);
+  });
+
+  it('safely handles Windows reserved DOS names like CON and NUL', () => {
+    expect(sanitizeFilename('CON')).toBe('CON_file');
+    expect(sanitizeFilename('nul')).toBe('nul_file');
+    expect(sanitizeFilename('aux')).toBe('aux_file');
+  });
 });

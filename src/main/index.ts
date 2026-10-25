@@ -24,7 +24,7 @@ async function createWindow(
   updateService: UpdateService
 ) {
   mainWindow = new BrowserWindow({
-    title: 'DDX Downloader',
+    title: 'Ddx Downloader',
     width: 1200,
     height: 820,
     minWidth: 980,

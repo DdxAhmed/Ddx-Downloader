@@ -1,10 +1,10 @@
 {
   "name": "ddx-downloader",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Production-quality open-source desktop application for downloading YouTube videos, educational courses, playlists, and online media.",
   "type": "module",
   "main": "dist-electron/main.cjs",
-  "author": "DDX Downloader Contributors",
+  "author": "Ddx Downloader Contributors",
   "license": "MIT",
   "homepage": "https://github.com/DdxAhmed/Ddx-Downloader",
   "repository": {
@@ -13,6 +13,7 @@
   },
   "scripts": {
     "dev:renderer": "vite",
+    "dev:web": "vite --open",
     "dev:electron": "node scripts/build-electron.mjs --watch",
     "dev": "cross-env NODE_ENV=development concurrently -k \"npm run dev:renderer\" \"npm run dev:electron\" \"wait-on tcp:5173 && electron .\"",
     "build:renderer": "vite build",
@@ -26,7 +27,7 @@
   },
   "build": {
     "appId": "com.ddx.downloader",
-    "productName": "DDX Downloader",
+    "productName": "Ddx Downloader",
     "publish": {
       "provider": "github",
       "owner": "DdxAhmed",
@@ -49,7 +50,7 @@
       }
     ],
     "win": {
-      "artifactName": "DDX-Downloader-Setup-${version}.${ext}",
+      "artifactName": "Ddx-Downloader-Setup-${version}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -60,7 +61,7 @@
       ]
     },
     "nsis": {
-      "artifactName": "DDX-Downloader-Setup-${version}.${ext}",
+      "artifactName": "Ddx-Downloader-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

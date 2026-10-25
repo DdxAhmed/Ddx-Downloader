@@ -4,6 +4,7 @@ import fs from 'fs';
 import { DependencyResolver } from './dependency-resolver';
 import { ProviderRegistry } from './providers/provider-registry';
 import { sanitizeFilename, buildOutputPath } from './filename-sanitizer';
+import { ErrorClassifier } from './error-classifier';
 import {
   MediaInfo,
   MediaFormat,
@@ -11,12 +12,15 @@ import {
   PlaylistItem,
   DownloadJob,
   CreateDownloadRequest,
+  MediaConversionRequest,
+  ConversionProgress,
 } from '../../types';
 
 export class MediaEngine {
   private resolver: DependencyResolver;
   private providerRegistry: ProviderRegistry;
   private activeProcesses: Map<string, ChildProcess> = new Map();
+  private activeConversionProcess?: ChildProcess;
 
   constructor(resolver: DependencyResolver) {
     this.resolver = resolver;
@@ -319,6 +323,11 @@ export class MediaEngine {
       args.push('--ffmpeg-location', ffmpegDir);
     }
 
+    // Apply speed limit if configured (e.g. '5M', '1M')
+    if (job.speedLimit && job.speedLimit !== 'unlimited') {
+      args.push('--limit-rate', job.speedLimit);
+    }
+
     if (job.isAudioOnly) {
       args.push('-x');
       const audioFormat = job.targetContainer === 'm4a' ? 'm4a' : 'mp3';
@@ -372,10 +381,16 @@ export class MediaEngine {
         if (!line.trim()) continue;
 
         // Check if merging / post-processing
-        if (line.includes('[Merger]') || line.includes('[ExtractAudio]') || line.includes('[Fixup')) {
+        if (line.includes('[Merger]')) {
+          job.status = 'merging';
+          job.progress = 99;
+          job.downloadSpeed = 'Merging video & audio streams...';
+          onProgress(job);
+          continue;
+        } else if (line.includes('[ExtractAudio]') || line.includes('[Fixup')) {
           job.status = 'processing';
           job.progress = 99;
-          job.downloadSpeed = 'Finalizing file...';
+          job.downloadSpeed = 'Processing audio format...';
           onProgress(job);
           continue;
         }
@@ -439,16 +454,20 @@ export class MediaEngine {
         // Was deliberately cancelled by user
         onProgress(job);
       } else {
+        const classified = ErrorClassifier.classify(stderrBuffer, code || undefined);
         job.status = 'failed';
-        job.errorMessage = stderrBuffer.trim() || `Process exited with code ${code}`;
+        job.errorMessage = classified.explanationEn;
+        job.errorDetails = classified;
         onError(job, new Error(job.errorMessage));
       }
     });
 
     child.on('error', (err) => {
       this.activeProcesses.delete(job.id);
+      const classified = ErrorClassifier.classify(err.message);
       job.status = 'failed';
-      job.errorMessage = err.message;
+      job.errorMessage = classified.explanationEn;
+      job.errorDetails = classified;
       onError(job, err);
     });
   }
@@ -518,5 +537,172 @@ export class MediaEngine {
     if (unit.startsWith('G')) return Math.round(val * 1024 * 1024 * 1024);
     if (unit.startsWith('T')) return Math.round(val * 1024 * 1024 * 1024 * 1024);
     return Math.round(val);
+  }
+
+  /**
+   * Standalone subtitle downloader: downloads and converts subtitles to SRT or VTT without video.
+   */
+  public async downloadStandaloneSubtitle(
+    url: string,
+    lang: string,
+    format: 'srt' | 'vtt',
+    outDir: string,
+    filename: string
+  ): Promise<{ success: boolean; filePath?: string; error?: string }> {
+    const ytDlpPath = await this.resolver.getYtDlpPath();
+    const ffmpegPath = await this.resolver.getFfmpegPath();
+
+    if (!ytDlpPath) {
+      return { success: false, error: 'yt-dlp is required to download subtitles.' };
+    }
+
+    if (!fs.existsSync(outDir)) {
+      fs.mkdirSync(outDir, { recursive: true });
+    }
+
+    const safeBase = sanitizeFilename(filename || 'subtitles');
+    const outTemplate = path.join(outDir, `${safeBase}.%(ext)s`);
+
+    const args: string[] = [
+      '--skip-download',
+      '--write-subs',
+      '--write-auto-subs',
+      '--sub-langs', lang,
+      '--convert-subs', format,
+      '-o', outTemplate,
+      url,
+    ];
+
+    if (ffmpegPath) {
+      args.push('--ffmpeg-location', path.dirname(ffmpegPath));
+    }
+
+    try {
+      await this.executeProcess(ytDlpPath, args);
+      const expectedFile = path.join(outDir, `${safeBase}.${format}`);
+      const expectedWithLang = path.join(outDir, `${safeBase}.${lang}.${format}`);
+      const finalPath = fs.existsSync(expectedFile)
+        ? expectedFile
+        : fs.existsSync(expectedWithLang)
+        ? expectedWithLang
+        : outTemplate;
+      return { success: true, filePath: finalPath };
+    } catch (err: any) {
+      const classified = ErrorClassifier.classify(err.message);
+      return { success: false, error: classified.explanationEn };
+    }
+  }
+
+  /**
+   * Media Converter Engine using FFmpeg: converts video and audio formats safely without overwriting originals.
+   */
+  public async convertMedia(
+    req: MediaConversionRequest,
+    onProgress: (prog: ConversionProgress) => void,
+    onComplete: (outputPath: string) => void,
+    onError: (err: Error) => void
+  ): Promise<void> {
+    const ffmpegPath = await this.resolver.getFfmpegPath();
+    if (!ffmpegPath) {
+      onError(new Error('FFmpeg is required for media conversion. Please configure its path in Settings.'));
+      return;
+    }
+
+    if (!fs.existsSync(req.inputPath)) {
+      onError(new Error('Input file does not exist on disk.'));
+      return;
+    }
+
+    // Ensure target output directory exists
+    const outDir = path.dirname(req.outputPath);
+    if (!fs.existsSync(outDir)) {
+      fs.mkdirSync(outDir, { recursive: true });
+    }
+
+    const args: string[] = ['-y', '-i', req.inputPath];
+
+    // Determine codec settings based on target format
+    switch (req.targetFormat) {
+      case 'mp3':
+        args.push('-vn', '-c:a', 'libmp3lame', '-b:a', '320k');
+        break;
+      case 'm4a':
+      case 'aac':
+        args.push('-vn', '-c:a', 'aac', '-b:a', '256k');
+        break;
+      case 'flac':
+        args.push('-vn', '-c:a', 'flac');
+        break;
+      case 'mp4':
+        args.push('-c:v', 'libx264', '-preset', req.qualityPreset === 'fast' ? 'ultrafast' : 'medium', '-crf', req.qualityPreset === 'high_quality' ? '18' : '23', '-c:a', 'aac');
+        break;
+      case 'mkv':
+        args.push('-c:v', 'copy', '-c:a', 'copy');
+        break;
+      case 'webm':
+        args.push('-c:v', 'libvpx-vp9', '-crf', '30', '-b:v', '0', '-c:a', 'libopus');
+        break;
+      default:
+        args.push('-c:v', 'copy', '-c:a', 'copy');
+    }
+
+    args.push(req.outputPath);
+
+    onProgress({ status: 'converting', percent: 1 });
+
+    const child = spawn(ffmpegPath, args, { windowsHide: true });
+    this.activeConversionProcess = child;
+
+    let stderrBuffer = '';
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderrBuffer += text;
+
+      // Parse speed and time progress from FFmpeg stderr:
+      // frame= 1234 fps= 45 q=28.0 size= 12450kB time=00:01:23.45 bitrate=1224.5kbits/s speed= 1.5x
+      const speedMatch = text.match(/speed=\s*([0-9.]+x)/);
+      const timeMatch = text.match(/time=(\d+:\d+:\d+\.\d+)/);
+
+      if (timeMatch || speedMatch) {
+        onProgress({
+          status: 'converting',
+          percent: 50, // indeterminate progress estimation
+          speed: speedMatch ? speedMatch[1] : undefined,
+          eta: timeMatch ? timeMatch[1] : undefined,
+        });
+      }
+    });
+
+    child.on('close', (code) => {
+      this.activeConversionProcess = undefined;
+      if (code === 0) {
+        onProgress({ status: 'completed', percent: 100 });
+        onComplete(req.outputPath);
+      } else {
+        const classified = ErrorClassifier.classify(stderrBuffer, code || undefined);
+        onError(new Error(classified.explanationEn));
+      }
+    });
+
+    child.on('error', (err) => {
+      this.activeConversionProcess = undefined;
+      onError(err);
+    });
+  }
+
+  public cancelConversion(): boolean {
+    if (!this.activeConversionProcess) return false;
+    try {
+      if (process.platform === 'win32' && this.activeConversionProcess.pid) {
+        spawn('taskkill', ['/pid', this.activeConversionProcess.pid.toString(), '/f', '/t']);
+      } else {
+        this.activeConversionProcess.kill('SIGTERM');
+      }
+      this.activeConversionProcess = undefined;
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

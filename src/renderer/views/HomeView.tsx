@@ -16,8 +16,21 @@ import {
   ArrowRight,
   ShieldCheck,
   ExternalLink,
+  AlertTriangle,
+  Folder,
+  Play,
+  Gauge,
+  Sliders,
 } from 'lucide-react';
-import { MediaInfo, MediaFormat, CreateDownloadRequest, PlaylistBatchDownloadRequest, DownloadJob } from '../../types';
+import {
+  MediaInfo,
+  MediaFormat,
+  CreateDownloadRequest,
+  PlaylistBatchDownloadRequest,
+  DownloadJob,
+  DuplicateCheckResult,
+} from '../../types';
+import { SupportedLanguage } from '../i18n';
 
 interface HomeViewProps {
   onStartDownload: (req: CreateDownloadRequest) => Promise<boolean>;
@@ -25,6 +38,7 @@ interface HomeViewProps {
   activeJobs: DownloadJob[];
   onNavigateToDownloads: () => void;
   onShowToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  lang: SupportedLanguage;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -33,11 +47,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
   activeJobs,
   onNavigateToDownloads,
   onShowToast,
+  lang,
 }) => {
+  const isAr = lang === 'ar';
   const [url, setUrl] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzedMedia, setAnalyzedMedia] = useState<MediaInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateInfo, setDuplicateInfo] = useState<DuplicateCheckResult | null>(null);
 
   // Tab inside media card: 'video' | 'audio' | 'subtitles'
   const [activeMediaTab, setActiveMediaTab] = useState<'video' | 'audio' | 'subtitles'>('video');
@@ -49,6 +66,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [selectedAudioFormat, setSelectedAudioFormat] = useState<string>('mp3');
   const [selectedSubtitles, setSelectedSubtitles] = useState<string[]>([]);
   const [embedSubtitles, setEmbedSubtitles] = useState(true);
+  const [speedLimit, setSpeedLimit] = useState<string>('unlimited');
+
+  // Quality Preset Profile
+  const [activeProfile, setActiveProfile] = useState<'best' | '1080p' | '720p' | 'small' | 'audio' | 'custom'>('best');
 
   // Playlist selection
   const [selectedPlaylistIndices, setSelectedPlaylistIndices] = useState<Set<number>>(new Set());
@@ -63,44 +84,97 @@ export const HomeView: React.FC<HomeViewProps> = ({
         handleAnalyze(text.trim());
       }
     } catch {
-      onShowToast('Could not access clipboard. Please paste using Ctrl+V.', 'error');
+      onShowToast(
+        isAr ? 'تعذر الوصول إلى الحافظة. يرجى اللصق باستخدام Ctrl+V.' : 'Could not access clipboard. Please paste using Ctrl+V.',
+        'error'
+      );
     }
   };
 
   const handleAnalyze = async (targetUrl = url) => {
     if (!targetUrl.trim()) {
-      setError('Please enter a media URL.');
+      setError(isAr ? 'يرجى إدخال رابط وسائط صالح.' : 'Please enter a media URL.');
       return;
     }
 
     setIsAnalyzing(true);
     setError(null);
     setAnalyzedMedia(null);
+    setDuplicateInfo(null);
 
     try {
+      // 1. Check duplicate status
+      if (window.electronAPI?.checkDuplicate) {
+        const dup = await window.electronAPI.checkDuplicate(targetUrl.trim());
+        if (dup.isDuplicate) {
+          setDuplicateInfo(dup);
+        }
+      }
+
+      // 2. Analyze URL metadata
       const res = await window.electronAPI.analyzeUrl(targetUrl.trim());
       if (res.success && res.data) {
         setAnalyzedMedia(res.data);
+
         // Default to best format
         if (res.data.formats.length > 0) {
           const first = res.data.formats[0];
           setSelectedFormatId(first.formatId);
           setSelectedQualityLabel(first.qualityLabel);
         }
+
         // If playlist, select all items by default
         if (res.data.isPlaylist && res.data.playlistItems) {
           const allIndices = new Set(res.data.playlistItems.map((item) => item.index));
           setSelectedPlaylistIndices(allIndices);
         }
-        onShowToast('Media analyzed successfully!', 'success');
+
+        onShowToast(isAr ? 'تم تحليل الوسائط بنجاح!' : 'Media analyzed successfully!', 'success');
       } else {
-        setError(res.error || 'Failed to extract media information.');
+        setError(res.error || (isAr ? 'تعذر استخراج بيانات الوسائط.' : 'Failed to extract media information.'));
         onShowToast(res.error || 'Failed to extract media information.', 'error');
       }
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred.');
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const applyProfile = (profile: 'best' | '1080p' | '720p' | 'small' | 'audio' | 'custom') => {
+    setActiveProfile(profile);
+    if (!analyzedMedia) return;
+
+    if (profile === 'best') {
+      const best = analyzedMedia.formats[0];
+      if (best) {
+        setSelectedFormatId(best.formatId);
+        setSelectedQualityLabel(best.qualityLabel);
+        setActiveMediaTab('video');
+      }
+    } else if (profile === '1080p') {
+      const target = analyzedMedia.formats.find((f) => f.height === 1080) || analyzedMedia.formats[0];
+      if (target) {
+        setSelectedFormatId(target.formatId);
+        setSelectedQualityLabel(target.qualityLabel);
+        setActiveMediaTab('video');
+      }
+    } else if (profile === '720p') {
+      const target = analyzedMedia.formats.find((f) => f.height === 720) || analyzedMedia.formats[0];
+      if (target) {
+        setSelectedFormatId(target.formatId);
+        setSelectedQualityLabel(target.qualityLabel);
+        setActiveMediaTab('video');
+      }
+    } else if (profile === 'small') {
+      const target = analyzedMedia.formats.find((f) => f.height && f.height <= 480) || analyzedMedia.formats[analyzedMedia.formats.length - 1];
+      if (target) {
+        setSelectedFormatId(target.formatId);
+        setSelectedQualityLabel(target.qualityLabel);
+        setActiveMediaTab('video');
+      }
+    } else if (profile === 'audio') {
+      setActiveMediaTab('audio');
     }
   };
 
@@ -119,11 +193,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
       container: isAudio ? selectedAudioFormat : selectedContainer,
       selectedSubtitles: selectedSubtitles.length > 0 ? selectedSubtitles : undefined,
       embedSubtitles: embedSubtitles && selectedSubtitles.length > 0,
+      speedLimit: speedLimit !== 'unlimited' ? speedLimit : undefined,
     };
 
     const success = await onStartDownload(req);
     if (success) {
-      onShowToast(`Queued "${analyzedMedia.title.substring(0, 30)}..." for download!`, 'success');
+      onShowToast(
+        isAr ? `تمت إضافة "${analyzedMedia.title.substring(0, 30)}..." إلى قائمة التنزيل!` : `Queued "${analyzedMedia.title.substring(0, 30)}..." for download!`,
+        'success'
+      );
     }
   };
 
@@ -135,7 +213,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     );
 
     if (selectedItems.length === 0) {
-      onShowToast('Please select at least one video to download.', 'error');
+      onShowToast(isAr ? 'يرجى تحديد مقطع فيديو واحد على الأقل للتنزيل.' : 'Please select at least one video to download.', 'error');
       return;
     }
 
@@ -155,14 +233,41 @@ export const HomeView: React.FC<HomeViewProps> = ({
       isAudioOnly: isAudio,
       container: isAudio ? selectedAudioFormat : selectedContainer,
       organizeInFolder: organizeCourseInFolder,
+      speedLimit: speedLimit !== 'unlimited' ? speedLimit : undefined,
     };
 
     const success = await onStartPlaylistDownload(req);
     if (success) {
       onShowToast(
-        `Queued ${selectedItems.length} course videos in "${analyzedMedia.title.substring(0, 25)}..."!`,
+        isAr ? `تم بدء تنزيل الدورة (${selectedItems.length} مقطع فيديو)!` : `Started course batch download (${selectedItems.length} videos)!`,
         'success'
       );
+    }
+  };
+
+  const handleDownloadStandaloneSubtitles = async () => {
+    if (!analyzedMedia || selectedSubtitles.length === 0) {
+      onShowToast(isAr ? 'يرجى تحديد لغة ترجمة واحدة على الأقل.' : 'Please select at least one subtitle language.', 'error');
+      return;
+    }
+
+    if (!window.electronAPI?.downloadStandaloneSubtitle) return;
+
+    const langCode = selectedSubtitles[0];
+    onShowToast(isAr ? 'جاري تنزيل ملف الترجمة...' : 'Downloading standalone subtitle...', 'info');
+
+    const res = await window.electronAPI.downloadStandaloneSubtitle(
+      analyzedMedia.url,
+      langCode,
+      'srt',
+      undefined,
+      analyzedMedia.title
+    );
+
+    if (res.success) {
+      onShowToast(isAr ? 'تم تنزيل ملف الترجمة SRT بنجاح!' : 'Subtitle downloaded successfully as SRT!', 'success');
+    } else {
+      onShowToast(res.error || 'Failed to download subtitle', 'error');
     }
   };
 
@@ -187,35 +292,42 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   const formatDuration = (seconds?: number) => {
     if (!seconds) return '';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) {
+      return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+    return `${m}:${String(s).padStart(2, '0')}`;
   };
 
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-8 animate-fadeIn">
-      {/* Hero Welcome Banner */}
-      <div className="relative rounded-2xl overflow-hidden p-8 border border-slate-800/80 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 shadow-xl">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
+      {/* Hero Welcome Section */}
+      <div className="relative overflow-hidden rounded-3xl p-8 bg-gradient-to-br from-indigo-950/60 via-[#0d1322] to-slate-900 border border-slate-800 shadow-2xl">
+        <div className="absolute -top-24 -right-24 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 max-w-2xl space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>High-Speed Local Media Downloader</span>
+            <span>{isAr ? 'محرك تنزيل محلي فائق السرعة' : 'High-Speed Local Media Downloader'}</span>
           </div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight leading-tight">
-            Download Educational Courses, Videos & Playlists
+            {isAr ? 'تنزيل الدورات التعليمية ومقاطع الفيديو وقوائم التشغيل' : 'Download Educational Courses, Videos & Playlists'}
           </h1>
           <p className="text-slate-300 text-sm leading-relaxed">
-            Fast, private, and offline-first. Download YouTube courses, lectures, high-resolution videos, and audio directly to your computer.
+            {isAr
+              ? 'سريع وآمن وخاص ومحلي 100%. نزّل دورات يوتيوب الكاملة، المحاضرات، المقاطع بجودات تصل إلى 4K، والصوتيات مباشرة إلى جهازك.'
+              : 'Fast, private, and offline-first. Download YouTube courses, lectures, high-resolution videos, and audio directly to your computer.'}
           </p>
         </div>
 
         {/* Supported Providers Pills */}
         <div className="mt-6 flex flex-wrap items-center gap-2 pt-4 border-t border-slate-800/60 text-xs text-slate-400">
-          <span className="font-semibold text-slate-300">Supported:</span>
+          <span className="font-semibold text-slate-300">{isAr ? 'المنصات المدعومة:' : 'Supported:'}</span>
           <span className="px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 font-medium">YouTube</span>
-          <span className="px-2.5 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-400 font-medium">Playlists & Courses</span>
+          <span className="px-2.5 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-400 font-medium">{isAr ? 'قوائم التشغيل والدورات' : 'Playlists & Courses'}</span>
           <span className="px-2.5 py-1 rounded-md bg-pink-500/10 border border-pink-500/20 text-pink-400 font-medium">Instagram Reels</span>
           <span className="px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 font-medium">Vimeo</span>
           <span className="px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-300 font-medium">+ 1000s of Web Media</span>
@@ -239,7 +351,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste video, course or playlist URL here (e.g. https://www.youtube.com/watch?v=...)"
+            placeholder={
+              isAr
+                ? 'الصق رابط الفيديو أو الدورة أو قائمة التشغيل هنا...'
+                : 'Paste video, course or playlist URL here (e.g. https://www.youtube.com/watch?v=...)'
+            }
             className="flex-1 bg-transparent border-0 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-0 px-2 py-3"
           />
 
@@ -250,7 +366,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             title="Paste from clipboard"
           >
             <Clipboard className="w-3.5 h-3.5" />
-            <span>Paste</span>
+            <span>{isAr ? 'لصق' : 'Paste'}</span>
           </button>
 
           <button
@@ -261,17 +377,56 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {isAnalyzing ? (
               <>
                 <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                <span>Analyzing...</span>
+                <span>{isAr ? 'جاري الفحص...' : 'Analyzing...'}</span>
               </>
             ) : (
               <>
                 <Sparkles className="w-4 h-4" />
-                <span>Analyze</span>
+                <span>{isAr ? 'فحص الرابط' : 'Analyze'}</span>
               </>
             )}
           </button>
         </form>
       </div>
+
+      {/* Duplicate Warning Alert Banner */}
+      {duplicateInfo && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <div className="text-xs">
+              <span className="font-bold block">
+                {isAr ? 'تنبيه: تم العثور على هذا المحتوى مسبقاً' : 'Notice: This media was already downloaded'}
+              </span>
+              <span className="text-amber-200/80">
+                {duplicateInfo.existingEntry
+                  ? `${isAr ? 'تم تنزيله في' : 'Completed on'} ${new Date(duplicateInfo.existingEntry.completedAt).toLocaleDateString()}`
+                  : isAr
+                  ? 'يوجد حالياً في قائمة الانتظار'
+                  : 'Currently in download queue'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs">
+            {duplicateInfo.existingFilePath && (
+              <button
+                onClick={() => window.electronAPI?.openFile(duplicateInfo.existingFilePath!)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 font-semibold"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>{isAr ? 'تشغيل الملف الحالي' : 'Play Existing'}</span>
+              </button>
+            )}
+            <button
+              onClick={() => setDuplicateInfo(null)}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+            >
+              {isAr ? 'تجاهل' : 'Dismiss'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error Message Alert */}
       {error && (
@@ -281,7 +436,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             onClick={() => setError(null)}
             className="text-red-400 hover:text-red-200 text-xs font-semibold underline ml-4"
           >
-            Dismiss
+            {isAr ? 'إغلاق' : 'Dismiss'}
           </button>
         </div>
       )}
@@ -296,15 +451,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div className="w-3 h-3 rounded-full bg-cyan-400 animate-ping" />
             <div>
               <p className="text-sm font-semibold text-white">
-                {activeJobs.length} {activeJobs.length === 1 ? 'download' : 'downloads'} in progress
+                {activeJobs.length} {activeJobs.length === 1 ? 'download' : 'downloads'} {isAr ? 'قيد التنزيل حالياً' : 'in progress'}
               </p>
               <p className="text-xs text-slate-400">
-                Click to open Download Manager and view live speeds and status
+                {isAr ? 'انقر لفتح شاشة التنزيلات ومتابعة السرعة اللحظية والتحكم' : 'Click to open Download Manager and view live speeds and status'}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-1.5 text-xs font-medium text-indigo-400 group-hover:text-indigo-300">
-            <span>View Manager</span>
+            <span>{isAr ? 'عرض المدير' : 'View Manager'}</span>
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
           </div>
         </div>
@@ -315,7 +470,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <div className="glass-card rounded-2xl overflow-hidden border border-slate-700 shadow-2xl space-y-6 p-6">
           {/* Header Row: Thumbnail, Info, Channel */}
           <div className="flex flex-col md:flex-row gap-6">
-            <div className="relative w-full md:w-72 h-44 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex-shrink-0 group">
+            <div className="relative w-full md:w-72 h-44 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 shrink-0 group">
               {analyzedMedia.thumbnail ? (
                 <img
                   src={analyzedMedia.thumbnail}
@@ -338,7 +493,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               {analyzedMedia.isPlaylist && (
                 <div className="absolute top-2 left-2 px-2.5 py-1 rounded bg-indigo-600/90 text-xs font-bold text-white flex items-center gap-1 shadow-md">
                   <ListVideo className="w-3.5 h-3.5" />
-                  <span>Course / Playlist ({analyzedMedia.playlistItemCount || 0} items)</span>
+                  <span>{isAr ? 'دورة / قائمة' : 'Course / Playlist'} ({analyzedMedia.playlistItemCount || 0} {isAr ? 'درس' : 'items'})</span>
                 </div>
               )}
             </div>
@@ -350,7 +505,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </span>
                 {analyzedMedia.isPlaylist && (
                   <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[11px] font-semibold">
-                    Structured Playlist
+                    {isAr ? 'قائمة تشغيل منظمة' : 'Structured Playlist'}
                   </span>
                 )}
               </div>
@@ -384,9 +539,39 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </div>
           </div>
 
+          {/* Quality Profiles Bar */}
+          <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <span className="text-slate-400 font-semibold flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{isAr ? 'التشكيل الافتراضي:' : 'Quality Profile:'}</span>
+            </span>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { id: 'best' as const, label: isAr ? 'أفضل جودة' : 'Best Quality' },
+                { id: '1080p' as const, label: '1080p Full HD' },
+                { id: '720p' as const, label: '720p HD' },
+                { id: 'small' as const, label: isAr ? 'حجم أصغر (480p)' : 'Smaller File (480p)' },
+                { id: 'audio' as const, label: isAr ? 'صوت فقط (MP3)' : 'Audio Only' },
+              ].map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => applyProfile(p.id)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    activeProfile === p.id
+                      ? 'bg-indigo-600 text-white shadow'
+                      : 'bg-slate-800/80 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Media Option Tabs */}
           <div className="border-t border-slate-800 pt-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setActiveMediaTab('video')}
@@ -397,7 +582,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   }`}
                 >
                   <Video className="w-4 h-4" />
-                  <span>Video Download</span>
+                  <span>{isAr ? 'تنزيل الفيديو' : 'Video Download'}</span>
                 </button>
 
                 <button
@@ -409,7 +594,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   }`}
                 >
                   <Music className="w-4 h-4" />
-                  <span>Audio Only</span>
+                  <span>{isAr ? 'صوت فقط' : 'Audio Only'}</span>
                 </button>
 
                 {analyzedMedia.subtitles && analyzedMedia.subtitles.length > 0 && (
@@ -422,31 +607,51 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     }`}
                   >
                     <Subtitles className="w-4 h-4" />
-                    <span>Subtitles ({analyzedMedia.subtitles.length})</span>
+                    <span>{isAr ? 'ملفات الترجمة' : 'Subtitles'} ({analyzedMedia.subtitles.length})</span>
                   </button>
                 )}
               </div>
 
-              {/* Container selector for video */}
-              {activeMediaTab === 'video' && (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-slate-400 font-medium">Container:</span>
+              {/* Speed Limit & Container Controls */}
+              <div className="flex items-center gap-3 text-xs">
+                {activeMediaTab === 'video' && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400 font-medium">{isAr ? 'الحاوية:' : 'Container:'}</span>
+                    <select
+                      value={selectedContainer}
+                      onChange={(e) => setSelectedContainer(e.target.value)}
+                      className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="mp4">MP4 (Recommended)</option>
+                      <option value="mkv">MKV (Matroska)</option>
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-1.5">
+                  <Gauge className="w-3.5 h-3.5 text-indigo-400" />
                   <select
-                    value={selectedContainer}
-                    onChange={(e) => setSelectedContainer(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500"
+                    value={speedLimit}
+                    onChange={(e) => setSpeedLimit(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none"
+                    title={isAr ? 'تحديد السرعة لهذا التنزيل' : 'Speed limit for this download'}
                   >
-                    <option value="mp4">MP4 (Recommended)</option>
-                    <option value="mkv">MKV (Matroska)</option>
+                    <option value="unlimited">{isAr ? 'سرعة غير محدودة' : 'Unlimited Speed'}</option>
+                    <option value="10M">10 MB/s</option>
+                    <option value="5M">5 MB/s</option>
+                    <option value="2M">2 MB/s</option>
+                    <option value="1M">1 MB/s</option>
                   </select>
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Video Qualities Tab */}
             {activeMediaTab === 'video' && (
               <div className="py-4 space-y-3">
-                <p className="text-xs font-semibold text-slate-300">Select Desired Quality:</p>
+                <p className="text-xs font-semibold text-slate-300">
+                  {isAr ? 'اختر الجودة المطلوبة من المصدر:' : 'Select Desired Quality from Source:'}
+                </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                   {analyzedMedia.formats
                     .filter((f) => !f.isAudioOnly)
@@ -458,6 +663,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                           onClick={() => {
                             setSelectedFormatId(fmt.formatId);
                             setSelectedQualityLabel(fmt.qualityLabel);
+                            setActiveProfile('custom');
                           }}
                           className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between ${
                             isSelected
@@ -485,7 +691,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {/* Audio Tab */}
             {activeMediaTab === 'audio' && (
               <div className="py-4 space-y-3">
-                <p className="text-xs font-semibold text-slate-300">Select Audio Format:</p>
+                <p className="text-xs font-semibold text-slate-300">
+                  {isAr ? 'اختر صيغة استخراج الصوت:' : 'Select Audio Format:'}
+                </p>
                 <div className="grid grid-cols-2 gap-3 max-w-md">
                   <div
                     onClick={() => setSelectedAudioFormat('mp3')}
@@ -499,7 +707,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <span className="font-bold text-sm">MP3 Audio</span>
                       {selectedAudioFormat === 'mp3' && <Check className="w-4 h-4 text-indigo-400" />}
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-1">Universal compatibility, converted via FFmpeg</p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      {isAr ? 'أعلى توافق مع جميع الأجهزة والمشغلات' : 'Universal compatibility, converted via FFmpeg'}
+                    </p>
                   </div>
 
                   <div
@@ -514,7 +724,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <span className="font-bold text-sm">M4A / AAC</span>
                       {selectedAudioFormat === 'm4a' && <Check className="w-4 h-4 text-indigo-400" />}
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-1">Original stream quality, fastest download</p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      {isAr ? 'جودة التدفق الأصلية بأسرع وقت' : 'Original stream quality, fastest download'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -523,17 +735,28 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {/* Subtitles Tab */}
             {activeMediaTab === 'subtitles' && (
               <div className="py-4 space-y-4">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    id="embedSubs"
-                    checked={embedSubtitles}
-                    onChange={(e) => setEmbedSubtitles(e.target.checked)}
-                    className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <label htmlFor="embedSubs" className="text-xs font-medium text-slate-300">
-                    Embed selected subtitles directly into video file (MKV/MP4)
-                  </label>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="embedSubs"
+                      checked={embedSubtitles}
+                      onChange={(e) => setEmbedSubtitles(e.target.checked)}
+                      className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <label htmlFor="embedSubs" className="text-xs font-medium text-slate-300 cursor-pointer">
+                      {isAr ? 'دمج الترجمة المحددة داخل حاوية الفيديو (MKV/MP4)' : 'Embed selected subtitles into video container (Soft Subtitles)'}
+                    </label>
+                  </div>
+
+                  <button
+                    onClick={handleDownloadStandaloneSubtitles}
+                    disabled={selectedSubtitles.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white border border-slate-700 disabled:opacity-50 transition-all self-start sm:self-auto"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'تنزيل ملف الترجمة منفصلاً (.SRT)' : 'Download Standalone Subtitle (.SRT)'}</span>
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1">
@@ -549,14 +772,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                             setSelectedSubtitles([...selectedSubtitles, sub.language]);
                           }
                         }}
-                        className={`p-2 rounded-lg border text-xs cursor-pointer flex items-center justify-between ${
+                        className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-colors ${
                           isChecked
                             ? 'bg-indigo-600/20 border-indigo-500 text-white'
                             : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:bg-slate-800'
                         }`}
                       >
                         <span className="truncate">{sub.name}</span>
-                        {isChecked && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                        {isChecked && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
                       </div>
                     );
                   })}
@@ -571,22 +794,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <div className="flex items-center gap-2">
                     <Layers className="w-4 h-4 text-indigo-400" />
                     <span className="text-xs font-bold text-white uppercase tracking-wider">
-                      Course Curriculum ({selectedPlaylistIndices.size} of {analyzedMedia.playlistItems.length} selected)
+                      {isAr ? 'محتوى الدورة التعليمية' : 'Course Curriculum'} ({selectedPlaylistIndices.size} of {analyzedMedia.playlistItems.length} {isAr ? 'محدد' : 'selected'})
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2 text-xs">
                     <button
                       onClick={selectAllPlaylist}
-                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
                     >
-                      Select All
+                      {isAr ? 'تحديد الكل' : 'Select All'}
                     </button>
                     <button
                       onClick={deselectAllPlaylist}
-                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
                     >
-                      Deselect All
+                      {isAr ? 'إلغاء التحديد' : 'Deselect All'}
                     </button>
                   </div>
                 </div>
@@ -600,7 +823,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     className="rounded bg-slate-900 border-slate-700 text-indigo-600"
                   />
                   <label htmlFor="organizeCourse" className="cursor-pointer">
-                    Organize into folder: <span className="text-indigo-300 font-mono">Downloads/{analyzedMedia.title.substring(0, 30)}/01 - Title.mp4</span>
+                    {isAr ? 'تنظيم في مجلد فرعي مرقم: ' : 'Organize into numbered folder: '}
+                    <span className="text-indigo-300 font-mono">Downloads/{analyzedMedia.title.substring(0, 30)}/01 - Title.mp4</span>
                   </label>
                 </div>
 
@@ -649,8 +873,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {/* Bottom Actions */}
             <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between">
               <div className="text-xs text-slate-400">
-                <span>Destination: </span>
-                <span className="font-semibold text-slate-300">Default Downloads Folder</span>
+                <span>{isAr ? 'المجلد الوجهة: ' : 'Destination: '}</span>
+                <span className="font-semibold text-slate-300">{isAr ? 'مجلد التنزيلات الافتراضي' : 'Default Downloads Folder'}</span>
               </div>
 
               {analyzedMedia.isPlaylist ? (
@@ -660,7 +884,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-600/30 disabled:opacity-50 transition-all"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Download Course ({selectedPlaylistIndices.size} Videos)</span>
+                  <span>{isAr ? `تنزيل الدورة (${selectedPlaylistIndices.size} فيديو)` : `Download Course (${selectedPlaylistIndices.size} Videos)`}</span>
                 </button>
               ) : (
                 <button
@@ -670,8 +894,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <Download className="w-4 h-4" />
                   <span>
                     {activeMediaTab === 'audio'
-                      ? `Download Audio (${selectedAudioFormat.toUpperCase()})`
-                      : `Download Video (${selectedQualityLabel})`}
+                      ? `${isAr ? 'تنزيل الصوت' : 'Download Audio'} (${selectedAudioFormat.toUpperCase()})`
+                      : `${isAr ? 'تنزيل الفيديو' : 'Download Video'} (${selectedQualityLabel})`}
                   </span>
                 </button>
               )}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings as SettingsIcon,
   Folder,
@@ -13,8 +13,17 @@ import {
   Download,
   RotateCw,
   Sparkles,
+  Gauge,
+  Trash2,
+  HardDrive,
+  Bell,
+  CopyCheck,
+  Globe,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { AppSettings, DependencyStatus, UpdateState } from '../../types';
+import { SupportedLanguage } from '../i18n';
 
 interface SettingsViewProps {
   settings: AppSettings;
@@ -27,6 +36,7 @@ interface SettingsViewProps {
   onDownloadUpdate: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
   onShowToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  lang: SupportedLanguage;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -40,7 +50,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onDownloadUpdate,
   onInstallUpdate,
   onShowToast,
+  lang,
 }) => {
+  const isAr = lang === 'ar';
   const [preferredQuality, setPreferredQuality] = useState(settings.preferredQuality);
   const [preferredContainer, setPreferredContainer] = useState(settings.preferredContainer);
   const [defaultAudioFormat, setDefaultAudioFormat] = useState(settings.defaultAudioFormat);
@@ -49,7 +61,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [downloadSubtitles, setDownloadSubtitles] = useState(settings.downloadSubtitles);
   const [customYtDlpPath, setCustomYtDlpPath] = useState(settings.customYtDlpPath || '');
   const [customFfmpegPath, setCustomFfmpegPath] = useState(settings.customFfmpegPath || '');
+  const [downloadSpeedLimit, setDownloadSpeedLimit] = useState(settings.downloadSpeedLimit || 'unlimited');
+  const [autoRetryTransient, setAutoRetryTransient] = useState(settings.autoRetryTransient !== false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(settings.notificationsEnabled !== false);
+  const [duplicateConflictPolicy, setDuplicateConflictPolicy] = useState(settings.duplicateConflictPolicy || 'prompt');
+  const [language, setLanguage] = useState(settings.language || 'en');
+  const [theme, setTheme] = useState(settings.theme || 'dark');
+
   const [isSaving, setIsSaving] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [diskSpace, setDiskSpace] = useState<{ freeBytes: number; totalBytes: number } | null>(null);
+
+  useEffect(() => {
+    if (settings.theme) setTheme(settings.theme);
+    if (settings.language) setLanguage(settings.language);
+  }, [settings.theme, settings.language]);
+
+  useEffect(() => {
+    if (window.electronAPI?.checkFreeDiskSpace) {
+      window.electronAPI.checkFreeDiskSpace().then((res) => {
+        if (res) setDiskSpace(res);
+      });
+    }
+  }, [settings.downloadDirectory]);
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  };
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -63,12 +105,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         downloadSubtitles,
         customYtDlpPath: customYtDlpPath.trim() || undefined,
         customFfmpegPath: customFfmpegPath.trim() || undefined,
+        downloadSpeedLimit,
+        autoRetryTransient,
+        notificationsEnabled,
+        duplicateConflictPolicy: duplicateConflictPolicy as any,
+        language,
+        theme,
       });
-      onShowToast('Settings saved successfully!', 'success');
+      onShowToast(isAr ? 'تم حفظ التفضيلات بنجاح!' : 'Settings saved successfully!', 'success');
     } catch {
-      onShowToast('Failed to save settings.', 'error');
+      onShowToast(isAr ? 'فشل حفظ الإعدادات.' : 'Failed to save settings.', 'error');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleCleanTemp = async () => {
+    if (!window.electronAPI?.cleanTempFiles) return;
+    setIsCleaning(true);
+    try {
+      const res = await window.electronAPI.cleanTempFiles();
+      if (res.success) {
+        onShowToast(
+          isAr
+            ? `تم تنظيف ${res.cleanedCount} ملف مؤقت بنجاح (تحرير ${formatBytes(res.freedBytes)})!`
+            : `Cleaned ${res.cleanedCount} temporary files (freed ${formatBytes(res.freedBytes)})!`,
+          'success'
+        );
+      } else {
+        onShowToast(res.error || 'Cleanup failed', 'error');
+      }
+    } catch (err: any) {
+      onShowToast(err.message, 'error');
+    } finally {
+      setIsCleaning(false);
     }
   };
 
@@ -79,10 +149,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2.5">
             <SettingsIcon className="w-6 h-6 text-indigo-400" />
-            <span>Preferences & Configuration</span>
+            <span>{isAr ? 'التفضيلات والإعدادات المتقدمة' : 'Preferences & Configuration'}</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Customize download destinations, media engines, and application behaviors.
+            {isAr
+              ? 'تخصيص مجلدات الحفظ، محركات الوسائط، قواعد الجدولة، وسياسات التكرار'
+              : 'Customize download destinations, media engines, scheduling rules, and duplicate detection.'}
           </p>
         </div>
 
@@ -92,20 +164,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all"
         >
           <Save className="w-4 h-4" />
-          <span>{isSaving ? 'Saving...' : 'Save Preferences'}</span>
+          <span>{isSaving ? (isAr ? 'جاري الحفظ...' : 'Saving...') : isAr ? 'حفظ التفضيلات' : 'Save Preferences'}</span>
         </button>
       </div>
 
       {/* 1. Storage & Downloads Directory */}
       <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          <Folder className="w-4 h-4 text-indigo-400" />
-          <span>Storage & Download Destination</span>
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <Folder className="w-4 h-4 text-indigo-400" />
+            <span>{isAr ? '1. مجلد التنزيل والمساحة التخزينية' : '1. Storage & Download Destination'}</span>
+          </h3>
+
+          {diskSpace && (
+            <span className="text-xs font-mono text-slate-400">
+              {isAr ? 'المساحة المتاحة:' : 'Free:'}{' '}
+              <strong className="text-indigo-400">{formatBytes(diskSpace.freeBytes)}</strong> / {formatBytes(diskSpace.totalBytes)}
+            </span>
+          )}
+        </div>
 
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-slate-300">
-            Default Download Directory
+            {isAr ? 'المجلد الافتراضي لحفظ التنزيلات' : 'Default Download Directory'}
           </label>
           <div className="flex items-center gap-2">
             <input
@@ -119,328 +200,247 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition-all flex items-center gap-1.5"
             >
               <Folder className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Browse...</span>
+              <span>{isAr ? 'استعراض...' : 'Browse...'}</span>
             </button>
           </div>
-          <p className="text-[11px] text-slate-500">
-            All videos and courses will be saved here unless otherwise specified.
-          </p>
+        </div>
+
+        {/* Temporary Files Cleanup Button */}
+        <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
+          <div>
+            <p className="text-xs font-semibold text-slate-300">
+              {isAr ? 'تنظيف الملفات المؤقتة (.part / .ytdl)' : 'Clean Stale Temporary Files (.part / .ytdl)'}
+            </p>
+            <p className="text-[11px] text-slate-500">
+              {isAr
+                ? 'يحذف فقط الملفات المؤقتة غير المكتملة القديمة بأمان لتحرير مساحة القرص.'
+                : 'Safely removes stale uncompleted download segments older than 15 minutes.'}
+            </p>
+          </div>
+
+          <button
+            onClick={handleCleanTemp}
+            disabled={isCleaning}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-amber-400" />
+            <span>{isCleaning ? (isAr ? 'جاري التنظيف...' : 'Cleaning...') : isAr ? 'تنظيف الآن' : 'Clean Temp Files'}</span>
+          </button>
         </div>
       </div>
 
-      {/* 2. Download Preferences */}
+      {/* 2. Download Rules & Concurrency */}
       <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          <Sliders className="w-4 h-4 text-indigo-400" />
-          <span>Download & Quality Defaults</span>
+          <Gauge className="w-4 h-4 text-indigo-400" />
+          <span>{isAr ? '2. قواعد التنزيل والسرعة' : '2. Download Rules, Speed & Concurrency'}</span>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">Preferred Video Quality</label>
+            <label className="text-xs font-medium text-slate-300">
+              {isAr ? 'الحد الأقصى للسرعة' : 'Global Speed Limit'}
+            </label>
             <select
-              value={preferredQuality}
-              onChange={(e) => setPreferredQuality(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              value={downloadSpeedLimit}
+              onChange={(e) => setDownloadSpeedLimit(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
             >
-              <option value="best">Best Available (Recommended)</option>
-              <option value="2160p">4K UHD (2160p)</option>
-              <option value="1440p">2K QHD (1440p)</option>
-              <option value="1080p">Full HD (1080p)</option>
-              <option value="720p">HD (720p)</option>
-              <option value="480p">SD (480p)</option>
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">Preferred Video Container</label>
-            <select
-              value={preferredContainer}
-              onChange={(e) => setPreferredContainer(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="mp4">MP4 (Widely Compatible)</option>
-              <option value="mkv">MKV (Matroska - Supports Advanced Subtitles)</option>
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">Default Audio Format</label>
-            <select
-              value={defaultAudioFormat}
-              onChange={(e) => setDefaultAudioFormat(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="mp3">MP3 (High Quality 320k)</option>
-              <option value="m4a">M4A (Original AAC Audio)</option>
+              <option value="unlimited">{isAr ? 'غير محدودة (الأسرع)' : 'Unlimited (Full Bandwidth)'}</option>
+              <option value="20M">20 MB/s</option>
+              <option value="10M">10 MB/s</option>
+              <option value="5M">5 MB/s</option>
+              <option value="2M">2 MB/s</option>
+              <option value="1M">1 MB/s</option>
             </select>
           </div>
 
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-300">
-              Maximum Concurrent Downloads: <span className="text-indigo-400 font-bold">{maxConcurrent}</span>
+              {isAr ? 'التنزيلات المتزامنة' : 'Max Concurrent Downloads'}
             </label>
-            <input
-              type="range"
-              min="1"
-              max="6"
+            <select
               value={maxConcurrent}
-              onChange={(e) => setMaxConcurrent(parseInt(e.target.value, 10))}
-              className="w-full accent-indigo-500 mt-2"
-            />
-            <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-              <span>1 (Sequential)</span>
-              <span>3 (Balanced)</span>
-              <span>6 (Fast Internet)</span>
-            </div>
+              onChange={(e) => setMaxConcurrent(Number(e.target.value))}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+            >
+              <option value="1">1 (Sequential - Saves CPU)</option>
+              <option value="2">2 concurrent</option>
+              <option value="3">3 (Recommended default)</option>
+              <option value="5">5 concurrent</option>
+              <option value="8">8 concurrent (High Speed)</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-slate-300">
+              {isAr ? 'سياسة الملفات المكررة' : 'Duplicate Media Policy'}
+            </label>
+            <select
+              value={duplicateConflictPolicy}
+              onChange={(e) => setDuplicateConflictPolicy(e.target.value as any)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+            >
+              <option value="prompt">{isAr ? 'تنبيه وسؤال المستخدم' : 'Prompt / Ask User'}</option>
+              <option value="skip">{isAr ? 'تخطي التكرار تلقائياً' : 'Skip Existing Items'}</option>
+              <option value="rename">{isAr ? 'تنزيل باسم مرقم فريد' : 'Download with Unique Suffix'}</option>
+            </select>
           </div>
         </div>
 
-        {/* Subtitles */}
-        <div className="pt-3 border-t border-slate-800 space-y-2">
-          <div className="flex items-center gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
             <input
               type="checkbox"
-              id="embedSubsPref"
-              checked={embedSubtitles}
-              onChange={(e) => setEmbedSubtitles(e.target.checked)}
-              className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500"
+              checked={autoRetryTransient}
+              onChange={(e) => setAutoRetryTransient(e.target.checked)}
+              className="rounded bg-slate-900 border-slate-700 text-indigo-600"
             />
-            <label htmlFor="embedSubsPref" className="text-xs text-slate-300 cursor-pointer">
-              Embed selected subtitle tracks into video files automatically
+            <span>
+              {isAr ? 'إعادة المحاولة التلقائية للأخطاء المؤقتة (مثل انقطاع الشبكة)' : 'Auto-retry transient failures (Network timeouts, rate limits)'}
+            </span>
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={notificationsEnabled}
+              onChange={(e) => setNotificationsEnabled(e.target.checked)}
+              className="rounded bg-slate-900 border-slate-700 text-indigo-600"
+            />
+            <span>
+              {isAr ? 'إشعارات ويندوز لسطح المكتب عند اكتمال التنزيل' : 'Enable Windows desktop notifications on task completion'}
+            </span>
+          </label>
+        </div>
+      </div>
+
+      {/* 3. Appearance & Language */}
+      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <Globe className="w-4 h-4 text-indigo-400" />
+          <span>{isAr ? '3. المظهر واللغة' : '3. Language & Appearance'}</span>
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-slate-300">
+              {isAr ? 'لغة الواجهة' : 'Interface Language'}
             </label>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+            >
+              <option value="en">English (LTR)</option>
+              <option value="ar">العربية (RTL - Arabic)</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-slate-300">
+              {isAr ? 'السمة والمظهر' : 'Color Theme'}
+            </label>
+            <select
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as any)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+            >
+              <option value="dark">{isAr ? 'المظهر الداكن (Dark Mode)' : 'Dark Glassmorphism (Default)'}</option>
+              <option value="light">{isAr ? 'المظهر الفاتح (Light Mode)' : 'Light Mode'}</option>
+            </select>
           </div>
         </div>
       </div>
 
-      {/* 3. Media Processing Engine & Dependencies */}
+      {/* 4. External Media Engines (yt-dlp and FFmpeg) */}
       <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Cpu className="w-4 h-4 text-indigo-400" />
-            <span>Media Engine Diagnostics</span>
+            <span>{isAr ? '4. محركات الوسائط الخارجية (yt-dlp & FFmpeg)' : '4. Media Engines & External Binaries'}</span>
           </h3>
 
           <button
             onClick={onRefreshDeps}
-            className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-medium"
+            className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>Re-verify Binaries</span>
+            <span>{isAr ? 'فحص المحركات' : 'Verify Engines'}</span>
           </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* yt-dlp card */}
-          <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white">yt-dlp Engine</span>
-              {dependencies?.ytDlp.available ? (
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+              <span className="text-xs font-bold text-white">yt-dlp Core Downloader</span>
+              {dependencies?.ytDlp?.available ? (
+                <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Ready</span>
+                  <span>{dependencies.ytDlp.version || 'Operational'}</span>
                 </span>
               ) : (
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-400">
+                <span className="text-[11px] text-rose-400 font-semibold flex items-center gap-1">
                   <AlertCircle className="w-3.5 h-3.5" />
                   <span>Missing</span>
                 </span>
               )}
             </div>
-
-            <div className="text-[11px] text-slate-400 space-y-1">
-              <div>Version: <span className="font-mono text-slate-300">{dependencies?.ytDlp.version || 'Unknown'}</span></div>
-              <div className="truncate" title={dependencies?.ytDlp.path}>
-                Path: <span className="font-mono text-slate-300">{dependencies?.ytDlp.path || 'Not detected'}</span>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <input
-                type="text"
-                value={customYtDlpPath}
-                onChange={(e) => setCustomYtDlpPath(e.target.value)}
-                placeholder="Custom yt-dlp path (optional)"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 focus:outline-none focus:border-indigo-500 font-mono"
-              />
-            </div>
+            <input
+              type="text"
+              value={customYtDlpPath}
+              onChange={(e) => setCustomYtDlpPath(e.target.value)}
+              placeholder="Default: bundled bin/yt-dlp.exe"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 font-mono focus:outline-none"
+            />
           </div>
 
-          {/* FFmpeg card */}
-          <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white">FFmpeg Stream Merger</span>
-              {dependencies?.ffmpeg.available ? (
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+              <span className="text-xs font-bold text-white">FFmpeg Processor & Converter</span>
+              {dependencies?.ffmpeg?.available ? (
+                <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Ready</span>
+                  <span>{dependencies.ffmpeg.version || 'Operational'}</span>
                 </span>
               ) : (
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-400">
+                <span className="text-[11px] text-amber-400 font-semibold flex items-center gap-1">
                   <AlertCircle className="w-3.5 h-3.5" />
                   <span>Missing</span>
                 </span>
               )}
             </div>
-
-            <div className="text-[11px] text-slate-400 space-y-1">
-              <div>Version: <span className="font-mono text-slate-300">{dependencies?.ffmpeg.version || 'Unknown'}</span></div>
-              <div className="truncate" title={dependencies?.ffmpeg.path}>
-                Path: <span className="font-mono text-slate-300">{dependencies?.ffmpeg.path || 'Not detected'}</span>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <input
-                type="text"
-                value={customFfmpegPath}
-                onChange={(e) => setCustomFfmpegPath(e.target.value)}
-                placeholder="Custom FFmpeg path (optional)"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 focus:outline-none focus:border-indigo-500 font-mono"
-              />
-            </div>
+            <input
+              type="text"
+              value={customFfmpegPath}
+              onChange={(e) => setCustomFfmpegPath(e.target.value)}
+              placeholder="Default: bundled bin/ffmpeg.exe"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 font-mono focus:outline-none"
+            />
           </div>
         </div>
       </div>
 
-      {/* 4. Software Updates */}
-      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+      {/* 5. Application Updates */}
+      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-indigo-400" />
-            <span>Automatic Updates</span>
-          </h3>
+          <div>
+            <h3 className="text-sm font-bold text-white">
+              {isAr ? 'تحديثات البرنامج الآلية' : 'Application Updates (GitHub Releases)'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {isAr ? 'النسخة الحالية:' : 'Current Version:'}{' '}
+              <strong className="text-white font-mono">{updateState.currentVersion}</strong>
+            </p>
+          </div>
 
           <button
             onClick={onCheckUpdates}
-            disabled={updateState.status === 'checking' || updateState.status === 'downloading'}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white shadow transition-all"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition-all"
           >
-            <RotateCw
-              className={`w-3.5 h-3.5 ${updateState.status === 'checking' ? 'animate-spin' : ''}`}
-            />
-            <span>
-              {updateState.status === 'checking' ? 'Checking...' : 'Check for Updates'}
-            </span>
+            <RotateCw className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{isAr ? 'التحقق من التحديثات' : 'Check for Updates'}</span>
           </button>
-        </div>
-
-        <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between text-xs">
-            <div>
-              <span className="text-slate-400">Installed Version: </span>
-              <span className="font-mono font-bold text-white">v{updateState.currentVersion}</span>
-            </div>
-
-            {updateState.lastChecked && (
-              <span className="text-[11px] text-slate-500">
-                Last checked: {new Date(updateState.lastChecked).toLocaleTimeString()}
-              </span>
-            )}
-          </div>
-
-          {/* Status Message */}
-          <div className="text-xs">
-            {updateState.status === 'checking' && (
-              <span className="text-indigo-400 flex items-center gap-1.5 font-medium">
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
-                <span>Checking GitHub Releases for new updates...</span>
-              </span>
-            )}
-
-            {updateState.status === 'not-available' && (
-              <span className="text-emerald-400 flex items-center gap-1.5 font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>You are on the latest version of DDX Downloader.</span>
-              </span>
-            )}
-
-            {updateState.status === 'available' && updateState.updateInfo && (
-              <div className="space-y-3 pt-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-emerald-400 font-semibold">
-                    New version available: v{updateState.updateInfo.version}
-                  </span>
-                  <button
-                    onClick={onDownloadUpdate}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition-all"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download Update</span>
-                  </button>
-                </div>
-                {updateState.updateInfo.releaseNotes && (
-                  <div className="text-[11px] text-slate-400 bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 max-h-28 overflow-y-auto whitespace-pre-wrap">
-                    {updateState.updateInfo.releaseNotes}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {updateState.status === 'downloading' && (
-              <div className="space-y-2 pt-1">
-                <span className="text-cyan-400 font-medium">
-                  Downloading update: {updateState.progress?.percent.toFixed(1)}%
-                </span>
-                <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
-                  <div
-                    className="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-300"
-                    style={{ width: `${updateState.progress?.percent || 5}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {updateState.status === 'downloaded' && (
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-emerald-400 font-semibold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Update downloaded! Ready to install.</span>
-                </span>
-                <button
-                  onClick={onInstallUpdate}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition-all"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  <span>Restart & Install</span>
-                </button>
-              </div>
-            )}
-
-            {updateState.status === 'error' && updateState.error && (
-              <span className="text-amber-400 flex items-center gap-1.5 font-medium">
-                <AlertCircle className="w-3.5 h-3.5" />
-                <span>{updateState.error}</span>
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* 5. About & Privacy */}
-      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase">
-            <ShieldCheck className="w-4 h-4" />
-            <span>Open Source & Local Privacy</span>
-          </div>
-          <span className="text-xs text-slate-500 font-mono">v1.0.0</span>
-        </div>
-
-        <p className="text-xs text-slate-400 leading-relaxed">
-          DDX Downloader is an open-source, local-first media extraction suite. It requires no backend server, no accounts, and transmits zero telemetry. All database operations and media downloads run strictly on your machine.
-        </p>
-
-        <div className="pt-2">
-          <a
-            href="https://github.com/DdxAhmed/Ddx-Downloader"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-medium"
-          >
-            <span>GitHub Repository & Documentation</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
         </div>
       </div>
     </div>

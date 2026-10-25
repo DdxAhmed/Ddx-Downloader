@@ -96,7 +96,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
               <p className="text-xs text-slate-400 mt-0.5">
                 {isDownloaded
                   ? 'The installer has been downloaded and verified.'
-                  : 'A new version of DDX Downloader is ready.'}
+                  : 'A new version of Ddx Downloader is ready.'}
               </p>
             </div>
           </div>

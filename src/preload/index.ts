@@ -5,6 +5,7 @@ import {
   AppSettings,
   DownloadJob,
   DependencyStatus,
+  MediaConversionRequest,
 } from '../types';
 
 const electronAPI = {
@@ -13,7 +14,24 @@ const electronAPI = {
   startPlaylistDownload: (req: PlaylistBatchDownloadRequest) =>
     ipcRenderer.invoke('media:downloadBatch', req),
   cancelDownload: (jobId: string) => ipcRenderer.invoke('media:cancel', jobId),
+  pauseDownload: (jobId: string) => ipcRenderer.invoke('media:pause', jobId),
+  resumeDownload: (jobId: string) => ipcRenderer.invoke('media:resume', jobId),
   retryDownload: (jobId: string) => ipcRenderer.invoke('media:retry', jobId),
+  retryAllFailed: () => ipcRenderer.invoke('media:retryAllFailed'),
+  checkDuplicate: (url: string) => ipcRenderer.invoke('media:checkDuplicate', url),
+  downloadStandaloneSubtitle: (
+    url: string,
+    lang: string,
+    format: 'srt' | 'vtt',
+    outDir?: string,
+    filename?: string
+  ) => ipcRenderer.invoke('media:downloadSubtitles', url, lang, format, outDir, filename),
+  convertMedia: (req: MediaConversionRequest) => ipcRenderer.invoke('media:convert', req),
+  cancelConversion: () => ipcRenderer.invoke('media:cancelConversion'),
+  selectFileForConversion: () => ipcRenderer.invoke('dialog:selectFileForConversion'),
+  checkFreeDiskSpace: (dirPath?: string) => ipcRenderer.invoke('storage:checkFreeSpace', dirPath),
+  cleanTempFiles: () => ipcRenderer.invoke('storage:cleanTemp'),
+  toggleMiniMode: (enable: boolean) => ipcRenderer.invoke('app:toggleMiniMode', enable),
   getQueue: () => ipcRenderer.invoke('queue:get'),
   clearCompletedQueue: () => ipcRenderer.invoke('queue:clearCompleted'),
   getHistory: () => ipcRenderer.invoke('history:get'),
@@ -47,6 +65,12 @@ const electronAPI = {
     const handler = (_event: any, status: DependencyStatus) => callback(status);
     ipcRenderer.on('dependencies:status', handler);
     return () => ipcRenderer.removeListener('dependencies:status', handler);
+  },
+
+  onConversionProgress: (callback: (progress: any) => void) => {
+    const handler = (_event: any, progress: any) => callback(progress);
+    ipcRenderer.on('conversion:progress', handler);
+    return () => ipcRenderer.removeListener('conversion:progress', handler);
   },
 
   // Auto Updater

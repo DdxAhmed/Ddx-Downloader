@@ -1,16 +1,33 @@
 # Changelog
 
-All notable changes to the **DDX Downloader** project will be documented in this file.
+All notable changes to the **Ddx Downloader** project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.0] - 2026-10-25
+
+### Added & Enhanced
+- **Official Branding**: Standardized branding to **Ddx Downloader** and automated NSIS setup pattern `Ddx-Downloader-Setup-${version}.exe`.
+- **Light & Dark Mode**: Modern light mode design system with instant UI toggle and persistent user preferences.
+- **Dynamic Error Classifier**: Central diagnostic classifier mapping yt-dlp stderr output to 18 structured error categories with Arabic & English explanations and credential redaction.
+- **Media Converter**: Built-in standalone converter supporting MP4, MKV, WebM, MP3, M4A, AAC, and FLAC using FFmpeg without overwriting originals.
+- **Standalone Subtitles Downloader**: Direct subtitle downloading (SRT/VTT) with multi-language selection.
+- **Duplicate Media Detection**: Pre-download conflict validation against active queue and completed library history.
+- **Smart Storage & Temp Cleaner**: Native filesystem free disk space inspection and safe automated cleanup of stale `.part`/`.ytdl` files.
+- **Bilingual Interface**: Full Arabic (RTL) and English (LTR) language support with dynamic layout direction switching.
+- **Mini Mode**: Compact floating monitor for tracking active downloads on screen.
+- **Keyboard Shortcuts**: System-wide shortcuts (`Ctrl+1..7`, `Ctrl+P`, `?`) and reference modal guide.
+- **Bounded Auto-Retries**: Exponential backoff automatic retry logic for transient network failures.
+
+---
+
 ## [1.0.0] - 2026-10-25
 
 ### Added
-- **Initial Production Release** of DDX Downloader.
+- **Initial Production Release** of Ddx Downloader.
 - **Home Dashboard**: Modern URL input with instant analysis, clipboard paste (Ctrl+V), and live provider badges.
 - **Modular Media Providers**: Native support for YouTube (videos, shorts, and playlists), Instagram Reels, Vimeo, TikTok, and thousands of supported websites via yt-dlp.
 - **Format & Resolution Selector**: Support for resolutions up to 4K UHD (2160p), 2K, 1080p Full HD, 720p, 480p, and SD.
