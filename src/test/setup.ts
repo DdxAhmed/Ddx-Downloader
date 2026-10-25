@@ -1,0 +1,2 @@
+// Vitest global setup
+export {};

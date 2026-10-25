@@ -1,0 +1,78 @@
+name: Release Distributables
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build & Publish Windows Distributables
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Type Checking
+        run: npm run typecheck
+
+      - name: Run Automated Test Suite
+        run: npm run test
+
+      - name: Provision Bundled Binaries (yt-dlp and FFmpeg)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "bin"
+          Write-Host "Downloading latest yt-dlp.exe..."
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "bin/yt-dlp.exe"
+          Write-Host "Downloading FFmpeg essential build..."
+          Invoke-WebRequest -Uri "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip" -OutFile "ffmpeg.zip"
+          Expand-Archive -Path "ffmpeg.zip" -DestinationPath "ffmpeg_temp"
+          $ffmpegBin = Get-ChildItem -Path "ffmpeg_temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          Copy-Item $ffmpegBin.FullName -Destination "bin/ffmpeg.exe"
+          Remove-Item -Recurse -Force "ffmpeg.zip", "ffmpeg_temp"
+          Write-Host "Binaries provisioned in bin/ successfully."
+
+      - name: Build and Package Windows Distributables
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist
+
+      - name: Verify Required Update Artifacts
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "release/latest.yml")) {
+            Write-Error "Missing required auto-update metadata: release/latest.yml"
+            exit 1
+          }
+          $exeFiles = Get-ChildItem -Path "release" -Filter "*.exe"
+          if ($exeFiles.Count -eq 0) {
+            Write-Error "No Windows installer executable found in release directory!"
+            exit 1
+          }
+          Write-Host "Release artifacts validated: latest.yml and $($exeFiles.Count) installer(s) found."
+
+      - name: Upload Release Binaries and Update Metadata
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+          draft: false
+          prerelease: false
+          generate_release_notes: true

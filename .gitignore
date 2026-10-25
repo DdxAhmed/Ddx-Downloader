@@ -1,0 +1,40 @@
+# Node & Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build Outputs
+dist/
+dist-electron/
+release/
+*.tsbuildinfo
+
+# SQLite Database & User Data
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+DdxDownloader/
+
+# Local Binaries
+bin/
+*.exe
+
+# OS specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment and IDE
+.env
+.env.local
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
