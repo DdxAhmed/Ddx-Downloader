@@ -21,9 +21,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "npm run build && electron-builder --win",
-    "dist:portable": "npm run build && electron-builder --win portable",
-    "dist:nsis": "npm run build && electron-builder --win nsis"
+    "dist": "npm run build && electron-builder --win nsis --x64",
+    "dist:nsis": "npm run build && electron-builder --win nsis --x64"
   },
   "build": {
     "appId": "com.ddx.downloader",
@@ -50,15 +49,10 @@
       }
     ],
     "win": {
+      "artifactName": "DDX-Downloader-Setup-${version}.${ext}",
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
           "arch": [
             "x64"
           ]
@@ -66,6 +60,7 @@
       ]
     },
     "nsis": {
+      "artifactName": "DDX-Downloader-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

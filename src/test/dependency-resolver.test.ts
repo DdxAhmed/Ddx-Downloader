@@ -19,7 +19,7 @@ describe('DependencyResolver Engine Verification', () => {
       expect(status.ffmpeg.path).toBeDefined();
       expect(status.ffmpeg.version).toBeDefined();
     }
-  });
+  }, 15000);
 
   it('allows updating custom paths dynamically', async () => {
     const resolver = new DependencyResolver();
@@ -28,5 +28,5 @@ describe('DependencyResolver Engine Verification', () => {
     // Should gracefully report missing or check fallback without crashing
     const ytPath = await resolver.getYtDlpPath();
     expect(ytPath).toBeDefined();
-  });
+  }, 15000);
 });

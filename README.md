@@ -101,7 +101,7 @@ graph TD
 - **Local Database**: SQLite with Drizzle ORM (`sql.js` WASM engine for 100% portable cross-platform execution without requiring native C++ build tools)
 - **Media Engines**: `yt-dlp` & `FFmpeg`
 - **Testing**: Vitest & React Testing Library
-- **Packaging**: `electron-builder` (NSIS installer & Portable x64 Windows binaries)
+- **Packaging**: `electron-builder` (NSIS x64 Windows installer)
 
 ---
 
@@ -148,19 +148,18 @@ npm run typecheck
 
 ## 🏗 Building & Packaging for Windows
 
-Build production bundles and Windows distributables:
+Build production bundles and Windows distributable:
 
 ```bash
 # Build Vite frontend and Electron main process
 npm run build
 
-# Package Windows NSIS Installer and Portable executable
-npm run dist
+# Package Windows NSIS Installer
+npm run dist:nsis
 ```
 
-Outputs will be generated in the `./release` directory:
-- `DDX Downloader Setup 1.0.0.exe` (Full Windows NSIS Installer)
-- `DDX Downloader 1.0.0.exe` (Portable Single-file Executable)
+The installer will be generated in the `./release` directory:
+- `DDX-Downloader-Setup-1.0.0.exe` (Full Windows NSIS Installer)
 
 ---
 

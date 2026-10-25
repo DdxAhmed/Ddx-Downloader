@@ -4,13 +4,14 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   release-windows:
-    name: Build & Publish Windows Distributables
+    name: Build & Publish Windows Distributable
     runs-on: windows-latest
 
     steps:
@@ -46,33 +47,33 @@ jobs:
           Remove-Item -Recurse -Force "ffmpeg.zip", "ffmpeg_temp"
           Write-Host "Binaries provisioned in bin/ successfully."
 
-      - name: Build and Package Windows Distributables
+      - name: Build and Package Windows NSIS Distributable
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist
+        run: npm run dist:nsis
 
-      - name: Verify Required Update Artifacts
+      - name: Verify Single Setup Executable
         shell: pwsh
         run: |
-          if (-not (Test-Path "release/latest.yml")) {
-            Write-Error "Missing required auto-update metadata: release/latest.yml"
+          $setupFiles = Get-ChildItem -Path "release" -Filter "DDX-Downloader-Setup-*.exe"
+          if ($setupFiles.Count -ne 1) {
+            Write-Error "Validation failed: Expected exactly 1 setup executable matching 'DDX-Downloader-Setup-*.exe', but found $($setupFiles.Count)."
             exit 1
           }
-          $exeFiles = Get-ChildItem -Path "release" -Filter "*.exe"
-          if ($exeFiles.Count -eq 0) {
-            Write-Error "No Windows installer executable found in release directory!"
-            exit 1
-          }
-          Write-Host "Release artifacts validated: latest.yml and $($exeFiles.Count) installer(s) found."
+          Write-Host "Success: Verified single setup installer -> $($setupFiles[0].Name) ($([math]::Round($setupFiles[0].Length / 1MB, 2)) MB)"
 
-      - name: Upload Release Binaries and Update Metadata
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload Setup Executable Artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            release/*.exe
-            release/*.blockmap
-            release/latest.yml
+          name: DDX-Downloader-Setup
+          path: release/DDX-Downloader-Setup-*.exe
+          if-no-files-found: error
+
+      - name: Publish Single Setup to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: release/DDX-Downloader-Setup-*.exe
           draft: false
           prerelease: false
           generate_release_notes: true
