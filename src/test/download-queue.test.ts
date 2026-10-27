@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -11,6 +11,7 @@ describe('DownloadQueue Manager & Concurrency Control', () => {
   let db: DatabaseService;
   let mockMediaEngine: any;
   let queue: DownloadQueue;
+  afterEach(() => vi.useRealTimers());
 
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ddx-queue-test-'));
@@ -31,6 +32,47 @@ describe('DownloadQueue Manager & Concurrency Control', () => {
     };
 
     queue = new DownloadQueue(db, mockMediaEngine as any, 2);
+  });
+
+  it.each([true, false])('honors automatic retry preference: %s', (enabled) => {
+    vi.useFakeTimers();
+    queue = new DownloadQueue(db, mockMediaEngine, 2, () => enabled);
+    mockMediaEngine.startDownload.mockImplementation((job: DownloadJob, _progress: any, _complete: any, error: any) => {
+      job.status = 'failed';
+      job.errorDetails = { isTransient: true } as any;
+      error(job, new Error('Network timeout'));
+    });
+    queue.addJob({
+      id: 'retry-setting', sourceUrl: 'https://example.com/video', sourcePlatform: 'generic',
+      mediaTitle: 'Video', selectedFormat: 'best', selectedQuality: 'best', targetContainer: 'mp4',
+      outputPath: path.join(tempDir, 'video.mp4'), status: 'queued', progress: 0,
+      downloadedBytes: 0, totalBytes: 0, downloadSpeed: '', eta: '', createdAt: new Date().toISOString(), isAudioOnly: false,
+    });
+    vi.runAllTimers();
+    expect(mockMediaEngine.startDownload).toHaveBeenCalledTimes(enabled ? 4 : 1);
+    expect(db.getJob('retry-setting')?.status).toBe('failed');
+  });
+
+  it('uses the updated preference during retry backoff', () => {
+    vi.useFakeTimers();
+    let enabled = true;
+    queue = new DownloadQueue(db, mockMediaEngine, 2, () => enabled);
+    mockMediaEngine.startDownload.mockImplementation((job: DownloadJob, _progress: any, _complete: any, error: any) => {
+      job.status = 'failed';
+      job.errorDetails = { isTransient: true } as any;
+      error(job, new Error('Network timeout'));
+    });
+    queue.addJob({
+      id: 'retry-toggle', sourceUrl: 'https://example.com/video', sourcePlatform: 'generic',
+      mediaTitle: 'Video', selectedFormat: 'best', selectedQuality: 'best', targetContainer: 'mp4',
+      outputPath: path.join(tempDir, 'video.mp4'), status: 'queued', progress: 0,
+      downloadedBytes: 0, totalBytes: 0, downloadSpeed: '', eta: '', createdAt: new Date().toISOString(), isAudioOnly: false,
+    });
+    expect(db.getJob('retry-toggle')?.status).toBe('retrying');
+    enabled = false;
+    vi.runAllTimers();
+    expect(mockMediaEngine.startDownload).toHaveBeenCalledTimes(1);
+    expect(db.getJob('retry-toggle')?.status).toBe('failed');
   });
 
   it('queues and completes jobs respecting concurrency', () => {

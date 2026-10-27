@@ -273,9 +273,56 @@ export function setupBrowserPreviewFallback(): boolean {
     retryAllFailed: async () => ({ success: true, requeuedCount: 0 }),
 
     checkFreeDiskSpace: async () => ({
+      available: true,
       freeBytes: 150000000000,
       totalBytes: 512000000000,
+      path: 'C:\\Users\\User\\Downloads',
     }),
+
+    checkDiskSpaceWithEstimates: async (_dir, estimatedBytes) => ({
+      diskSpace: {
+        available: true,
+        freeBytes: 150000000000,
+        totalBytes: 512000000000,
+        path: 'C:\\Users\\User\\Downloads',
+      },
+      estimatedRequiredBytes: estimatedBytes,
+      estimatedPeakBytes: Math.round(estimatedBytes * 2),
+      pendingQueueBytes: 0,
+      projectedRemainingBytes: 150000000000 - Math.round(estimatedBytes * 2),
+      isLowSpace: false,
+      isInsufficient: false,
+    }),
+
+    // Courses & Playlists Mock
+    saveCourse: async () => ({ success: true, courseId: 'mock-course-1' }),
+    getCourses: async () => [],
+    getCourse: async () => null,
+    syncCourse: async () => ({ success: true }),
+    downloadCourseItems: async () => ({ success: true, jobIds: [] }),
+    deleteCourse: async () => ({ success: true }),
+
+    // Subtitle Search Mock
+    searchSubtitles: async () => ({ results: [], total: 0, page: 1, pageSize: 20, totalPages: 0 }),
+    importSubtitleFiles: async () => ({ success: true, indexedCount: 0 }),
+    importSubtitleFolder: async () => ({ success: true, indexedCount: 0 }),
+    playMediaAtTimestamp: async () => ({ success: true, copiedTimestamp: '00:00' }),
+    getDetectedMediaPlayers: async () => [],
+
+    // Sizing & Estimates Mock
+    estimateFormatSize: async (fmt, duration) => ({
+      bytes: fmt?.filesize || (duration ? Math.round(duration * 250000) : 0),
+      type: fmt?.filesize ? 'reported' : 'estimated',
+      details: 'Browser preview calculation',
+    }),
+    estimatePlaylistSize: async (items) => ({
+      totalBytes: items.length * 150000000,
+      knownCount: items.length,
+      unknownCount: 0,
+      totalCount: items.length,
+      isComplete: true,
+    }),
+    fetchPlaylistItemSizes: async () => ({}),
 
     cleanTempFiles: async () => ({
       success: true,

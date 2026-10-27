@@ -55,6 +55,24 @@ describe('ErrorClassifier & Sanitizer', () => {
     expect(formatErr.isTransient).toBe(false);
   });
 
+  it('does not mistake a yt-dlp JavaScript warning for a missing executable', () => {
+    const err = ErrorClassifier.classify(
+      'WARNING: [youtube] No supported JavaScript runtime could be found. Some formats may be missing.\n' +
+      'opus in MP4 support is experimental. Could not write header for output file #0.\nERROR: ffmpeg exited with code 1'
+    );
+    expect(err.category).toBe('unsupported_format');
+    expect(err.category).not.toBe('missing_ytdlp');
+    expect(err.explanationAr).toContain('دمج');
+  });
+
+  it('redacts complete signed media URL query strings including lsig values', () => {
+    const clean = ErrorClassifier.sanitizeDetails(
+      'Input https://googlevideo.com/videoplayback?expire=1&sig=secret&lsig=also-secret&ip=127.0.0.1'
+    );
+    expect(clean).toBe('Input https://googlevideo.com/videoplayback?[REDACTED]');
+    expect(clean).not.toContain('also-secret');
+  });
+
   it('always provides both English and Arabic translations', () => {
     const err = ErrorClassifier.classify('unknown obscure failure code 999');
     expect(err.titleEn).toBeDefined();

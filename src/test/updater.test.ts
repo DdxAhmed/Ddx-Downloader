@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { UpdateState } from '../types';
 
@@ -41,6 +41,10 @@ vi.mock('electron', () => ({
 vi.mock('electron-updater', () => ({
   autoUpdater: mockAutoUpdater,
 }));
+vi.mock('../main/updater/updater-logger', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../main/updater/updater-logger')>(),
+  createUpdaterLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
 
 // Import UpdateService and IPC register after mocking
 import { UpdateService } from '../main/updater/update-service';
@@ -50,9 +54,10 @@ import { registerIpcHandlers } from '../main/ipc';
 describe('UpdateService & Automatic Update Workflow', () => {
   let updater: UpdateService;
   let stateChanges: UpdateState[] = [];
+  afterEach(() => { updater.stopPeriodicChecks(); vi.useRealTimers(); });
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockAutoUpdater.removeAllListeners();
     stateChanges = [];
 
@@ -99,7 +104,7 @@ describe('UpdateService & Automatic Update Workflow', () => {
       });
     });
 
-    await updater.checkForUpdates(false);
+    await updater.checkForUpdates(true);
     const state = updater.getState();
 
     expect(state.status).toBe('available');
@@ -107,6 +112,23 @@ describe('UpdateService & Automatic Update Workflow', () => {
     expect(state.updateInfo?.releaseNotes).toContain('Added automatic update support');
     expect(state.updateInfo?.releaseNotes).toContain('Performance improvements');
     expect(state.lastChecked).toBeDefined();
+  });
+
+  it('downloads automatically after a scheduled check but not after a manual check', async () => {
+    mockAutoUpdater.downloadUpdate.mockResolvedValue([]);
+    mockAutoUpdater.checkForUpdates.mockImplementation(async () => {
+      mockAutoUpdater.emit('update-available', { version: '1.1.0', releaseNotes: 'Safe update' });
+    });
+
+    await updater.checkForUpdates(false);
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(mockAutoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
+
+    mockAutoUpdater.downloadUpdate.mockClear();
+    mockAutoUpdater.emit('update-not-available', { version: '1.0.0' });
+    await updater.checkForUpdates(true);
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(mockAutoUpdater.downloadUpdate).not.toHaveBeenCalled();
   });
 
   it('handles update-not-available events for latest version', async () => {
@@ -162,21 +184,21 @@ describe('UpdateService & Automatic Update Workflow', () => {
     expect(state.error).toBeNull();
   });
 
-  it('safely rejects restart-and-install if update is not downloaded', () => {
+  it('safely rejects restart-and-install if update is not downloaded', async () => {
     // Current status is idle
-    const res = updater.installUpdate();
+    const res = await updater.installUpdate();
     expect(res.success).toBe(false);
     expect(res.error).toContain('fully downloaded');
     expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
   });
 
-  it('calls quitAndInstall only when update is fully downloaded upon explicit request', () => {
+  it('calls quitAndInstall only when update is fully downloaded upon explicit request', async () => {
     // Transition to downloaded state
     mockAutoUpdater.emit('update-downloaded', { version: '1.1.0' });
 
-    const res = updater.installUpdate();
+    const res = await updater.installUpdate();
     expect(res.success).toBe(true);
-    expect(mockAutoUpdater.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(mockAutoUpdater.quitAndInstall).toHaveBeenCalledWith(true, true);
   });
 
   it('sanitizes and handles update check errors without crashing', async () => {
@@ -212,6 +234,80 @@ describe('UpdateService & Automatic Update Workflow', () => {
 
     updater.stopPeriodicChecks();
     expect((updater as any).checkInterval).toBeNull();
+  });
+
+  it('enables differential updates and silent install on exit', () => {
+    expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(true);
+    expect(mockAutoUpdater.disableDifferentialDownload).toBe(false);
+    expect(mockAutoUpdater.autoDownload).toBe(false);
+  });
+  it('can defer exit installation to protect data while keeping the downloaded update', () => {
+    mockAutoUpdater.emit('update-downloaded', { version: '1.1.0' });
+    updater.setInstallOnExitAllowed(false, 'Data is inside the installation folder');
+    expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(false);
+    expect(updater.getState()).toMatchObject({ status: 'downloaded', installOnExit: false });
+    updater.setInstallOnExitAllowed(true);
+    expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(true);
+    expect(updater.getState().error).toBeNull();
+  });
+
+  it('keeps a downloaded update across manual checks', async () => {
+    mockAutoUpdater.emit('update-downloaded', { version: '1.1.0' });
+    await updater.checkForUpdates(true);
+    expect(updater.getState().status).toBe('downloaded');
+    expect(mockAutoUpdater.checkForUpdates).not.toHaveBeenCalled();
+    expect((await updater.downloadUpdate()).success).toBe(false);
+    expect(mockAutoUpdater.downloadUpdate).not.toHaveBeenCalled();
+    expect(updater.getState().currentVersion).toBe('1.0.0');
+  });
+
+  it('locks downloads even if an SDK error precedes promise settlement', async () => {
+    let finish!: () => void;
+    mockAutoUpdater.downloadUpdate.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    mockAutoUpdater.emit('update-available', { version: '1.1.0' });
+    const first = updater.downloadUpdate();
+    mockAutoUpdater.emit('error', new Error('Temporary failure'));
+    expect((await updater.downloadUpdate()).success).toBe(false);
+    expect((await updater.checkForUpdates()).success).toBe(false);
+    finish(); await first;
+    expect(mockAutoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for shutdown preparation and supports postponing', async () => {
+    mockAutoUpdater.emit('update-downloaded', { version: '1.1.0' });
+    updater.setPrepareShutdown(async () => false);
+    expect((await updater.installUpdate()).postponed).toBe(true);
+    expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    expect(updater.getState().status).toBe('downloaded');
+    let finish!: (ready: boolean) => void;
+    updater.setPrepareShutdown(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const first = updater.installUpdate();
+    expect((await updater.installUpdate()).success).toBe(false);
+    expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    finish(true); await first;
+    expect(mockAutoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not install after persistence failure', async () => {
+    mockAutoUpdater.emit('update-downloaded', { version: '1.1.0' });
+    updater.setPrepareShutdown(async () => { throw new Error('Could not flush database'); });
+    expect((await updater.installUpdate()).success).toBe(false);
+    expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    expect(updater.getState().status).toBe('downloaded');
+  });
+
+  it('does not fabricate transferred bytes at completion', () => {
+    mockAutoUpdater.emit('download-progress', { percent: 99, total: 10000, transferred: 9000, bytesPerSecond: 100 });
+    mockAutoUpdater.emit('update-downloaded', { version: '1.1.0' });
+    expect(updater.getState().progress?.transferred).toBe(9000);
+  });
+
+  it('clears initial and periodic checks and does not schedule twice', () => {
+    vi.useFakeTimers();
+    updater.startPeriodicChecks(); updater.startPeriodicChecks();
+    expect(vi.getTimerCount()).toBe(2);
+    updater.stopPeriodicChecks();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('validates IPC handlers for updater channels safely', async () => {

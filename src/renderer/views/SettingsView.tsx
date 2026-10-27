@@ -22,7 +22,8 @@ import {
   Sun,
   Moon,
 } from 'lucide-react';
-import { AppSettings, DependencyStatus, UpdateState } from '../../types';
+import { AppSettings, DependencyStatus, UpdateState, DiskSpaceInfo } from '../../types';
+import { UpdateContent } from '../components/UpdateContent';
 import { SupportedLanguage } from '../i18n';
 
 interface SettingsViewProps {
@@ -70,7 +71,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const [isSaving, setIsSaving] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
-  const [diskSpace, setDiskSpace] = useState<{ freeBytes: number; totalBytes: number } | null>(null);
+  const [diskSpace, setDiskSpace] = useState<DiskSpaceInfo | null>(null);
 
   useEffect(() => {
     if (settings.theme) setTheme(settings.theme);
@@ -143,7 +144,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-8 animate-fadeIn">
+    <div className="px-5 py-6 lg:px-8 lg:py-7 max-w-[1200px] mx-auto space-y-6 animate-fadeIn">
       {/* Page Title */}
       <div className="flex items-center justify-between pb-4 border-b border-slate-800">
         <div>
@@ -161,7 +162,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <button
           onClick={handleSave}
           disabled={isSaving}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all"
+          className="btn-glow-primary flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold text-white shadow-xl shadow-indigo-500/30 transition-all cursor-pointer"
         >
           <Save className="w-4 h-4" />
           <span>{isSaving ? (isAr ? 'جاري الحفظ...' : 'Saving...') : isAr ? 'حفظ التفضيلات' : 'Save Preferences'}</span>
@@ -169,17 +170,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 1. Storage & Downloads Directory */}
-      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+      <div className="glass-acrylic-card p-6 rounded-2xl border border-white/[0.08] space-y-4 shadow-lg">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Folder className="w-4 h-4 text-indigo-400" />
             <span>{isAr ? '1. مجلد التنزيل والمساحة التخزينية' : '1. Storage & Download Destination'}</span>
           </h3>
 
-          {diskSpace && (
-            <span className="text-xs font-mono text-slate-400">
+          {diskSpace && diskSpace.available && typeof diskSpace.freeBytes === 'number' && (
+            <span className="text-xs font-mono text-slate-300">
               {isAr ? 'المساحة المتاحة:' : 'Free:'}{' '}
-              <strong className="text-indigo-400">{formatBytes(diskSpace.freeBytes)}</strong> / {formatBytes(diskSpace.totalBytes)}
+              <strong className="text-indigo-400 font-bold">{formatBytes(diskSpace.freeBytes)}</strong> / {formatBytes(diskSpace.totalBytes || 0)}
+            </span>
+          )}
+          {diskSpace && !diskSpace.available && (
+            <span className="text-xs font-mono text-amber-400">
+              {isAr ? 'المساحة غير متاحة' : 'Disk space unavailable'}
             </span>
           )}
         </div>
@@ -193,11 +199,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="text"
               readOnly
               value={settings.downloadDirectory}
-              className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-200 font-mono focus:outline-none"
+              className="flex-1 glass-input rounded-xl px-4 py-2.5 text-xs text-slate-200 font-mono focus:outline-none"
             />
             <button
               onClick={onSelectDirectory}
-              className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition-all flex items-center gap-1.5"
+              className="px-4 py-2.5 rounded-xl text-xs font-semibold glass-acrylic hover:bg-white/[0.08] text-white border border-white/[0.08] transition-all flex items-center gap-2 cursor-pointer shadow-sm"
             >
               <Folder className="w-3.5 h-3.5 text-indigo-400" />
               <span>{isAr ? 'استعراض...' : 'Browse...'}</span>
@@ -206,7 +212,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         {/* Temporary Files Cleanup Button */}
-        <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
+        <div className="pt-2 flex items-center justify-between border-t border-white/[0.06]">
           <div>
             <p className="text-xs font-semibold text-slate-300">
               {isAr ? 'تنظيف الملفات المؤقتة (.part / .ytdl)' : 'Clean Stale Temporary Files (.part / .ytdl)'}
@@ -221,7 +227,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <button
             onClick={handleCleanTemp}
             disabled={isCleaning}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold glass-acrylic hover:bg-white/[0.08] text-slate-300 hover:text-white border border-white/[0.08] transition-all cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5 text-amber-400" />
             <span>{isCleaning ? (isAr ? 'جاري التنظيف...' : 'Cleaning...') : isAr ? 'تنظيف الآن' : 'Clean Temp Files'}</span>
@@ -230,7 +236,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 2. Download Rules & Concurrency */}
-      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+      <div className="glass-acrylic-card p-6 rounded-2xl border border-white/[0.08] space-y-4 shadow-lg">
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <Gauge className="w-4 h-4 text-indigo-400" />
           <span>{isAr ? '2. قواعد التنزيل والسرعة' : '2. Download Rules, Speed & Concurrency'}</span>
@@ -244,7 +250,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <select
               value={downloadSpeedLimit}
               onChange={(e) => setDownloadSpeedLimit(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+              className="w-full glass-input rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none"
             >
               <option value="unlimited">{isAr ? 'غير محدودة (الأسرع)' : 'Unlimited (Full Bandwidth)'}</option>
               <option value="20M">20 MB/s</option>
@@ -262,7 +268,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <select
               value={maxConcurrent}
               onChange={(e) => setMaxConcurrent(Number(e.target.value))}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+              className="w-full glass-input rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none"
             >
               <option value="1">1 (Sequential - Saves CPU)</option>
               <option value="2">2 concurrent</option>
@@ -279,7 +285,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <select
               value={duplicateConflictPolicy}
               onChange={(e) => setDuplicateConflictPolicy(e.target.value as any)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+              className="w-full glass-input rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none"
             >
               <option value="prompt">{isAr ? 'تنبيه وسؤال المستخدم' : 'Prompt / Ask User'}</option>
               <option value="skip">{isAr ? 'تخطي التكرار تلقائياً' : 'Skip Existing Items'}</option>
@@ -294,7 +300,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="checkbox"
               checked={autoRetryTransient}
               onChange={(e) => setAutoRetryTransient(e.target.checked)}
-              className="rounded bg-slate-900 border-slate-700 text-indigo-600"
+              className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500"
             />
             <span>
               {isAr ? 'إعادة المحاولة التلقائية للأخطاء المؤقتة (مثل انقطاع الشبكة)' : 'Auto-retry transient failures (Network timeouts, rate limits)'}
@@ -306,7 +312,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="checkbox"
               checked={notificationsEnabled}
               onChange={(e) => setNotificationsEnabled(e.target.checked)}
-              className="rounded bg-slate-900 border-slate-700 text-indigo-600"
+              className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500"
             />
             <span>
               {isAr ? 'إشعارات ويندوز لسطح المكتب عند اكتمال التنزيل' : 'Enable Windows desktop notifications on task completion'}
@@ -316,7 +322,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 3. Appearance & Language */}
-      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+      <div className="glass-acrylic-card p-6 rounded-2xl border border-white/[0.08] space-y-4 shadow-lg">
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <Globe className="w-4 h-4 text-indigo-400" />
           <span>{isAr ? '3. المظهر واللغة' : '3. Language & Appearance'}</span>
@@ -330,7 +336,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <select
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+              className="w-full glass-input rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none"
             >
               <option value="en">English (LTR)</option>
               <option value="ar">العربية (RTL - Arabic)</option>
@@ -344,17 +350,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <select
               value={theme}
               onChange={(e) => setTheme(e.target.value as any)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none"
+              className="w-full glass-input rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none"
             >
-              <option value="dark">{isAr ? 'المظهر الداكن (Dark Mode)' : 'Dark Glassmorphism (Default)'}</option>
-              <option value="light">{isAr ? 'المظهر الفاتح (Light Mode)' : 'Light Mode'}</option>
+              <option value="dark">{isAr ? 'المظهر الداكن (Dark Glassmorphism)' : 'Dark Glassmorphism (Default)'}</option>
+              <option value="light">{isAr ? 'المظهر الفاتح (Light Mode)' : 'Light Studio Mode'}</option>
             </select>
           </div>
         </div>
       </div>
 
       {/* 4. External Media Engines (yt-dlp and FFmpeg) */}
-      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+      <div className="glass-acrylic-card p-6 rounded-2xl border border-white/[0.08] space-y-4 shadow-lg">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Cpu className="w-4 h-4 text-indigo-400" />
@@ -363,7 +369,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             onClick={onRefreshDeps}
-            className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+            className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>{isAr ? 'فحص المحركات' : 'Verify Engines'}</span>
@@ -371,7 +377,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+          <div className="p-4 rounded-xl bg-black/25 border border-white/[0.06] space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-white">yt-dlp Core Downloader</span>
               {dependencies?.ytDlp?.available ? (
@@ -391,11 +397,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               value={customYtDlpPath}
               onChange={(e) => setCustomYtDlpPath(e.target.value)}
               placeholder="Default: bundled bin/yt-dlp.exe"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 font-mono focus:outline-none"
+              className="w-full glass-input rounded-xl px-3 py-2 text-xs text-slate-300 font-mono focus:outline-none"
             />
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+          <div className="p-4 rounded-xl bg-black/25 border border-white/[0.06] space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-white">FFmpeg Processor & Converter</span>
               {dependencies?.ffmpeg?.available ? (
@@ -415,14 +421,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               value={customFfmpegPath}
               onChange={(e) => setCustomFfmpegPath(e.target.value)}
               placeholder="Default: bundled bin/ffmpeg.exe"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 font-mono focus:outline-none"
+              className="w-full glass-input rounded-xl px-3 py-2 text-xs text-slate-300 font-mono focus:outline-none"
             />
           </div>
         </div>
       </div>
 
       {/* 5. Application Updates */}
-      <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-3">
+      <div className="glass-acrylic-card p-6 rounded-2xl border border-white/[0.08] space-y-3 shadow-lg">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-bold text-white">
@@ -436,12 +442,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             onClick={onCheckUpdates}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition-all"
+            disabled={['checking', 'downloading', 'downloaded', 'installing'].includes(updateState.status)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold glass-acrylic hover:bg-white/[0.08] text-white border border-white/[0.08] transition-all cursor-pointer shadow-sm"
           >
             <RotateCw className="w-3.5 h-3.5 text-indigo-400" />
             <span>{isAr ? 'التحقق من التحديثات' : 'Check for Updates'}</span>
           </button>
         </div>
+        <UpdateContent updateState={updateState} lang={lang} onDownload={onDownloadUpdate} onInstall={onInstallUpdate} />
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import path from 'path';
-import { sanitizeFilename, buildOutputPath } from '../main/media/filename-sanitizer';
+import { sanitizeFilename, buildOutputPath, parseTimestamp, validateTimeRange } from '../main/media/filename-sanitizer';
 
 describe('Filename Sanitizer & Path Builder', () => {
   it('removes illegal Windows filesystem characters', () => {
@@ -52,5 +52,24 @@ describe('Filename Sanitizer & Path Builder', () => {
     expect(sanitizeFilename('CON')).toBe('CON_file');
     expect(sanitizeFilename('nul')).toBe('nul_file');
     expect(sanitizeFilename('aux')).toBe('aux_file');
+  });
+
+  it('parses supported clip timestamps and rejects malformed clock values', () => {
+    expect(parseTimestamp('02:15')).toBe(135);
+    expect(parseTimestamp('01:02:03.5')).toBe(3723.5);
+    expect(parseTimestamp('95.5')).toBe(95.5);
+    expect(parseTimestamp('01:60')).toBeNull();
+    expect(parseTimestamp('-1')).toBeNull();
+  });
+
+  it('validates clip bounds and creates an unmistakable clip filename', () => {
+    expect(validateTimeRange(135, 220, 720).valid).toBe(true);
+    expect(validateTimeRange(220, 135, 720).valid).toBe(false);
+    expect(validateTimeRange(135, 800, 720).valid).toBe(false);
+
+    const out = buildOutputPath('C:/Downloads', 'عنوان الفيديو', 'mp4', {
+      timeRange: { start: 135, end: 220 },
+    });
+    expect(out).toContain('عنوان الفيديو [02m15s-03m40s].mp4');
   });
 });

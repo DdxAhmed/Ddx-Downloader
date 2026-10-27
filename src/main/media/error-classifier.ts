@@ -7,6 +7,9 @@ export class ErrorClassifier {
   public static sanitizeDetails(raw: string): string {
     if (!raw) return '';
     return raw
+      // Signed CDN media URLs are short-lived credentials. Keep the host/path
+      // useful for diagnosis while removing the complete query string.
+      .replace(/(https?:\/\/[^\s?'"<>]+)\?[^\s'"<>]+/gi, '$1?[REDACTED]')
       // Strip token query parameters: &token=..., &sig=..., &key=...
       .replace(/([?&](?:token|sig|signature|key|auth|session|pass|password|expires)=)[^&\s]+/gi, '$1[REDACTED]')
       // Strip authorization headers or bearer tokens
@@ -60,7 +63,10 @@ export class ErrorClassifier {
     }
 
     // 3. Missing yt-dlp
-    if (text.includes('yt-dlp') && (text.includes('not found') || text.includes('missing') || text.includes('not recognized'))) {
+    if (
+      /(?:yt-dlp(?:\.exe)?[^\r\n]{0,80})(?:not found|could not be found|is missing|not recognized)/i.test(rawError) ||
+      /(?:enoent|spawn)[^\r\n]{0,80}yt-dlp/i.test(rawError)
+    ) {
       return {
         category: 'missing_ytdlp',
         titleEn: 'yt-dlp Not Found',
@@ -222,15 +228,22 @@ export class ErrorClassifier {
     }
 
     // 12. Unsupported Format
-    if (text.includes('requested format is not available') || text.includes('no video formats found')) {
+    if (
+      text.includes('requested format is not available') ||
+      text.includes('no video formats found') ||
+      text.includes('could not write header for output file') ||
+      text.includes('incorrect codec parameters') ||
+      (text.includes('experimental') && text.includes('opus in mp4')) ||
+      (text.includes('ffmpeg exited with code') && text.includes('stream mapping'))
+    ) {
       return {
         category: 'unsupported_format',
-        titleEn: 'Format Not Available',
-        titleAr: 'التنسيق المطلوب غير متوفر',
-        explanationEn: 'The selected resolution or format is not provided by the media host for this item.',
-        explanationAr: 'الدقة أو التنسيق المحدد غير متاح من قبل خادم الوسائط لهذا المقطع بالتحديد.',
-        suggestedActionEn: 'Select "Best Available Quality" or another resolution from the quality picker.',
-        suggestedActionAr: 'اختر "أفضل جودة متاحة" أو اختر دقة أخرى من قائمة التنسيقات.',
+        titleEn: 'Format or Codec Incompatible',
+        titleAr: 'التنسيق أو الترميز غير متوافق',
+        explanationEn: 'The selected video, audio, and output container could not be combined safely.',
+        explanationAr: 'تعذر دمج مسارات الفيديو والصوت داخل حاوية الإخراج المحددة بصورة متوافقة.',
+        suggestedActionEn: 'Retry with Best Available Quality, MP4-compatible audio, or the MKV container.',
+        suggestedActionAr: 'أعد المحاولة مع أفضل جودة متاحة أو صوت متوافق مع MP4 أو حاوية MKV.',
         isTransient: false,
         sanitizedDetails: sanitized,
         exitCode,

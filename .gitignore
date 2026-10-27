@@ -22,6 +22,7 @@ DdxDownloader/
 bin/
 *.exe
 
+test
 # OS specific files
 .DS_Store
 Thumbs.db

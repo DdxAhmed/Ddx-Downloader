@@ -158,36 +158,36 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-6 animate-fadeIn">
+    <div className="px-5 py-6 lg:px-8 lg:py-7 max-w-[1440px] mx-auto space-y-6 animate-fadeIn">
       {/* Top Filter and Stats Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-4 rounded-2xl border border-slate-800">
-        <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800 text-xs font-semibold">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-acrylic p-3.5 rounded-2xl border border-white/[0.08] shadow-md">
+        <div className="flex flex-wrap items-center gap-1.5 bg-black/20 p-1 rounded-xl border border-white/[0.05] text-xs font-semibold">
           <button
             onClick={() => setFilter('all')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg transition-all ${
               filter === 'all'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'btn-glow-primary shadow-sm font-bold'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-white/[0.04]'
             }`}
           >
             {isAr ? 'الكل' : 'All'} ({queue.length})
           </button>
           <button
             onClick={() => setFilter('active')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg transition-all ${
               filter === 'active'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'btn-glow-primary shadow-sm font-bold'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-white/[0.04]'
             }`}
           >
             {isAr ? 'نشط' : 'Active'} ({activeJobs.length})
           </button>
           <button
             onClick={() => setFilter('queued')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg transition-all ${
               filter === 'queued'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'btn-glow-primary shadow-sm font-bold'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-white/[0.04]'
             }`}
           >
             {isAr ? 'بالانتظار' : 'Queued'} ({queuedJobs.length})
@@ -195,10 +195,10 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
           {pausedJobs.length > 0 && (
             <button
               onClick={() => setFilter('paused')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
+              className={`px-3.5 py-1.5 rounded-lg transition-all ${
                 filter === 'paused'
-                  ? 'bg-indigo-600 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'btn-glow-primary shadow-sm font-bold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-white/[0.04]'
               }`}
             >
               {isAr ? 'متوقف' : 'Paused'} ({pausedJobs.length})
@@ -206,20 +206,20 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
           )}
           <button
             onClick={() => setFilter('completed')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg transition-all ${
               filter === 'completed'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'btn-glow-primary shadow-sm font-bold'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-white/[0.04]'
             }`}
           >
             {isAr ? 'المكتملة' : 'Completed'} ({completedJobs.length})
           </button>
           <button
             onClick={() => setFilter('failed')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg transition-all ${
               filter === 'failed'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'btn-glow-primary shadow-sm font-bold'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-white/[0.04]'
             }`}
           >
             {isAr ? 'الفاشلة' : 'Failed'} ({failedJobs.length})
@@ -230,7 +230,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
           {failedJobs.length > 0 && onRetryAllFailed && (
             <button
               onClick={onRetryAllFailed}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-indigo-300 hover:text-white bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 transition-all"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-indigo-300 hover:text-white glass-acrylic hover:border-indigo-500/50 hover:bg-indigo-500/20 border border-indigo-500/30 transition-all shadow-sm"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>{isAr ? 'إعادة محاولة الفاشلة' : 'Retry All Failed'}</span>
@@ -240,7 +240,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
           {completedJobs.length > 0 && (
             <button
               onClick={onClearCompleted}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700/80 border border-slate-700 transition-all"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white glass-acrylic hover:bg-white/[0.08] border border-white/[0.08] transition-all"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>{isAr ? 'مسح المكتملة' : 'Clear Completed'}</span>
@@ -251,26 +251,22 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
 
       {/* Queue Items List */}
       {filteredJobs.length === 0 ? (
-        <div className="glass-card rounded-2xl p-12 text-center space-y-4 border border-slate-800">
-          <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-500/20">
-            <Download className="w-8 h-8" />
+        <div className="glass-acrylic-card rounded-3xl p-12 text-center space-y-4 border border-white/[0.08] shadow-xl">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-500/20 via-purple-500/20 to-cyan-500/20 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-500/30 shadow-lg shadow-indigo-500/20">
+            <Download className="w-8 h-8 text-indigo-400" />
           </div>
           <h3 className="text-lg font-bold text-white">
             {isAr ? 'لا توجد تنزيلات في هذه القائمة' : 'No downloads found'}
           </h3>
-          <p className="text-slate-400 text-sm max-w-sm mx-auto">
-            {filter === 'all'
-              ? isAr
-                ? 'قائمة التنزيلات فارغة حالياً. الصق رابطاً في الصفحة الرئيسية لبدء التنزيل!'
-                : 'Your download queue is currently empty. Paste a URL on the Home screen to start downloading!'
-              : isAr
-              ? `لا توجد تنزيلات في حالة "${filter}".`
-              : `There are currently no downloads in the "${filter}" state.`}
+          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            {isAr
+              ? 'الصق رابط فيديو أو دورة في الصفحة الرئيسية لبدء تنزيل الملفات بسرعة فائقة.'
+              : 'Paste a video or course URL on the Home tab to start downloading files.'}
           </p>
           {filter === 'all' && (
             <button
               onClick={onNavigateHome}
-              className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all inline-flex items-center gap-2"
+              className="btn-glow-primary px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg shadow-indigo-500/30 transition-all inline-flex items-center gap-2 cursor-pointer"
             >
               <span>{isAr ? 'إضافة وسائط للتنزيل' : 'Add Media to Download'}</span>
               <ArrowUpRight className="w-4 h-4" />
@@ -289,12 +285,12 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
             return (
               <div
                 key={job.id}
-                className="glass-card rounded-2xl p-4 border border-slate-800 hover:border-slate-700/80 transition-all space-y-3"
+                className="glass-acrylic-card rounded-2xl p-4 sm:p-5 border border-white/[0.08] hover:border-indigo-500/30 transition-all space-y-3.5 shadow-lg"
               >
                 <div className="flex items-start justify-between gap-4">
                   {/* Media Thumbnail & Title */}
                   <div className="flex items-center gap-3.5 flex-1 min-w-0">
-                    <div className="w-20 h-14 rounded-lg bg-slate-900 border border-slate-800 shrink-0 overflow-hidden relative">
+                    <div className="w-20 h-14 rounded-xl bg-slate-900 border border-white/[0.08] shrink-0 overflow-hidden relative shadow-md">
                       {job.thumbnailUrl ? (
                         <img
                           src={job.thumbnailUrl}
@@ -315,15 +311,15 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {getStatusBadge(job)}
-                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase">
+                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase border border-indigo-500/20">
                           {job.sourcePlatform}
                         </span>
-                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-medium">
+                        <span className="px-1.5 py-0.5 rounded bg-white/[0.05] text-slate-300 text-[10px] font-medium border border-white/[0.06]">
                           {job.selectedQuality}
                         </span>
-                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-mono">
+                        <span className="px-1.5 py-0.5 rounded bg-white/[0.05] text-slate-300 text-[10px] font-mono border border-white/[0.06]">
                           {job.targetContainer.toUpperCase()}
                         </span>
                         {job.playlistTitle && (
@@ -333,13 +329,13 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                         )}
                       </div>
 
-                      <h4 className="text-sm font-bold text-white truncate mt-1" title={job.mediaTitle}>
+                      <h4 className="text-sm font-bold text-white truncate mt-1.5" title={job.mediaTitle}>
                         {job.mediaTitle}
                       </h4>
 
                       {/* User friendly error or status summary */}
                       {isFailed && (
-                        <p className="text-xs text-rose-400 truncate mt-0.5" title={job.errorMessage}>
+                        <p className="text-xs text-rose-400 truncate mt-0.5 font-medium" title={job.errorMessage}>
                           {job.errorDetails
                             ? isAr
                               ? job.errorDetails.titleAr
@@ -357,7 +353,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                       <button
                         onClick={() => onPauseJob(job.id)}
                         title={isAr ? 'إيقاف مؤقت' : 'Pause Download'}
-                        className="p-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all"
+                        className="p-2 rounded-xl text-xs font-semibold glass-acrylic hover:bg-white/[0.08] text-slate-300 hover:text-white transition-all shadow-sm"
                       >
                         <Pause className="w-3.5 h-3.5" />
                       </button>
@@ -367,7 +363,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                       <button
                         onClick={() => onResumeJob(job.id)}
                         title={isAr ? 'استئناف التنزيل' : 'Resume Download'}
-                        className="p-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all"
+                        className="p-2 rounded-xl text-xs font-semibold btn-glow-primary text-white transition-all shadow-sm"
                       >
                         <Play className="w-3.5 h-3.5" />
                       </button>
@@ -378,7 +374,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                       <button
                         onClick={() => onCancelJob(job.id)}
                         title={isAr ? 'إلغاء التنزيل' : 'Cancel Download'}
-                        className="p-2 rounded-xl text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-all"
+                        className="p-2 rounded-xl text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-all shadow-sm"
                       >
                         <XCircle className="w-3.5 h-3.5" />
                       </button>
@@ -388,7 +384,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                     {isFailed && (
                       <button
                         onClick={() => onRetryJob(job.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 transition-all"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-300 hover:text-white glass-acrylic hover:bg-indigo-500/20 border border-indigo-500/30 transition-all shadow-sm"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>{isAr ? 'إعادة' : 'Retry'}</span>
@@ -400,7 +396,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                       <>
                         <button
                           onClick={() => onOpenFile(job.outputPath)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-all"
+                          className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl text-xs font-bold btn-glow-primary text-white shadow-md shadow-indigo-600/20 transition-all"
                         >
                           <Play className="w-3.5 h-3.5" />
                           <span>{isAr ? 'تشغيل' : 'Play'}</span>
@@ -409,7 +405,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                         <button
                           onClick={() => onOpenFolder(job.outputPath)}
                           title={isAr ? 'عرض في المجلد' : 'Reveal in Folder'}
-                          className="p-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all"
+                          className="p-2 rounded-xl text-xs font-semibold glass-acrylic hover:bg-white/[0.08] text-slate-300 hover:text-white transition-all"
                         >
                           <Folder className="w-3.5 h-3.5" />
                         </button>
@@ -420,7 +416,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                     <button
                       onClick={() => setSelectedJobForDetails(job)}
                       title={isAr ? 'عرض التفاصيل والتشخيص' : 'View Details & Diagnostics'}
-                      className="p-2 rounded-xl text-xs font-semibold bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-all"
+                      className="p-2 rounded-xl text-xs font-semibold glass-acrylic hover:bg-white/[0.08] text-slate-400 hover:text-slate-200 transition-all"
                     >
                       <Info className="w-3.5 h-3.5" />
                     </button>
@@ -429,11 +425,15 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
 
                 {/* Progress bar and metrics */}
                 {(isDownloading || isQueued || isPaused) && (
-                  <div className="space-y-1.5 pt-1">
+                  <div className="space-y-2 pt-1.5">
                     <div className="flex items-center justify-between text-xs text-slate-400">
                       <div className="flex items-center gap-3 font-mono text-[11px]">
-                        <span>{formatBytes(job.downloadedBytes)} / {formatBytes(job.totalBytes)}</span>
-                        {job.downloadSpeed && <span className="text-indigo-400 font-semibold">{job.downloadSpeed}</span>}
+                        <span className="text-slate-300 font-semibold">{formatBytes(job.downloadedBytes)} / {formatBytes(job.totalBytes)}</span>
+                        {job.downloadSpeed && (
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/25 text-indigo-300 font-bold text-[10px]">
+                            {job.downloadSpeed}
+                          </span>
+                        )}
                         {job.speedLimit && (
                           <span className="text-slate-500 text-[10px]">
                             (Limit: {job.speedLimit})
@@ -441,16 +441,20 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                         )}
                       </div>
                       <div className="flex items-center gap-3">
-                        {job.eta && <span>ETA: {job.eta}</span>}
-                        <span className="font-bold text-white">{job.progress.toFixed(1)}%</span>
+                        {job.eta && (
+                          <span className="px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/25 text-purple-300 font-semibold text-[10px]">
+                            ETA: {job.eta}
+                          </span>
+                        )}
+                        <span className="font-extrabold text-white font-mono">{job.progress.toFixed(1)}%</span>
                       </div>
                     </div>
-                    <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div className="w-full bg-black/40 rounded-full h-2 overflow-hidden p-0.5 border border-white/[0.05]">
                       <div
-                        className={`h-1.5 rounded-full transition-all duration-300 ${
+                        className={`h-full rounded-full transition-all duration-300 ${
                           isPaused
                             ? 'bg-slate-500'
-                            : 'bg-gradient-to-r from-indigo-500 via-indigo-400 to-cyan-400'
+                            : 'bg-gradient-to-r from-cyan-400 via-indigo-500 to-purple-500 shadow-[0_0_12px_rgba(99,102,241,0.6)]'
                         }`}
                         style={{ width: `${Math.max(job.progress, 1)}%` }}
                       />

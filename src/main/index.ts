@@ -1,19 +1,47 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, dialog } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { DatabaseService } from './database';
 import { DependencyResolver } from './media/dependency-resolver';
 import { MediaEngine } from './media/media-engine';
 import { DownloadQueue } from './queue/download-queue';
 import { UpdateService } from './updater/update-service';
 import { registerIpcHandlers } from './ipc';
+import { ShutdownCoordinator } from './updater/shutdown-coordinator';
+import { assertDataOutsideInstallDirectory } from './updater/update-data-guard';
 
 let mainWindow: BrowserWindow | null = null;
 let db: DatabaseService | null = null;
 let queue: DownloadQueue | null = null;
 let mediaEngine: MediaEngine | null = null;
 let updateService: UpdateService | null = null;
+let shutdown: ShutdownCoordinator | null = null;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+function protectUpdateData(): void {
+  if (!app.isPackaged || !db || !updateService) return;
+  let ar = false;
+  try {
+    const settings = db.getSettings(app.getPath('downloads'));
+    ar = settings.language === 'ar';
+    const courses = db.getAllCourses();
+    const locations = [app.getPath('userData'), settings.downloadDirectory,
+      ...db.getHistory().map((entry) => entry.filePath),
+      ...db.getAllJobs().map((job) => path.dirname(job.outputPath)),
+      ...courses.flatMap((course) => [course.destinationFolder,
+        ...db!.getCourseItems(course.id).map((item) => item.localFilePath || '')]),
+    ].filter((location) => location && fs.existsSync(location)).map((location) => fs.realpathSync(location));
+    assertDataOutsideInstallDirectory(fs.realpathSync(path.dirname(app.getPath('exe'))), locations);
+    updateService.setInstallOnExitAllowed(true);
+  } catch (error) {
+    const message = ar
+      ? 'تم تأجيل التحديث: توجد بيانات أو ملفات وسائط داخل مجلد تثبيت البرنامج. انقلها خارج هذا المجلد قبل تطبيق التحديث.'
+      : (error as Error).message;
+    updateService.setInstallOnExitAllowed(false, message);
+    throw new Error(message);
+  }
+}
 
 async function createWindow(
   db: DatabaseService,
@@ -40,6 +68,13 @@ async function createWindow(
       sandbox: false,
       webSecurity: false, // Allows loading local Vite assets over file://
     },
+  });
+
+  mainWindow.on('close', (event) => {
+    if (process.platform !== 'darwin' && shutdown && !shutdown.ready) {
+      event.preventDefault();
+      app.quit();
+    }
   });
 
   // Register IPC Handlers BEFORE loading any URL/HTML
@@ -126,10 +161,37 @@ app.whenReady().then(async () => {
     mediaEngine = new MediaEngine(resolver);
 
     // 4. Initialize Download Queue
-    queue = new DownloadQueue(db, mediaEngine, settings.maxConcurrentDownloads);
+    queue = new DownloadQueue(db, mediaEngine, settings.maxConcurrentDownloads,
+      () => db!.getSettings(defaultDownloadsDir).autoRetryTransient !== false);
 
     // 5. Initialize Update Service
     updateService = new UpdateService(isDev);
+    shutdown = new ShutdownCoordinator({
+      hasActiveWork: () => mediaEngine!.hasActiveWork(),
+      confirmInterruption: async () => {
+        const ar = db!.getSettings(defaultDownloadsDir).language === 'ar';
+        const result = await dialog.showMessageBox({
+          type: 'warning',
+          title: ar ? 'يوجد عمل قيد التنفيذ' : 'Work is still running',
+          message: ar ? 'الخروج أو إعادة التشغيل سيوقف التنزيلات والدمج والتحويلات الحالية.' : 'Exiting or restarting will interrupt active downloads, merging, and conversions.',
+          detail: ar ? 'سيتم حفظ قائمة التنزيلات لإمكانية استئنافها. قد تحتاج إلى إعادة التحويل. يمكنك التأجيل.' : 'The download queue will be saved for resuming. Conversions may need to be restarted. You can postpone.',
+          buttons: ar ? ['لاحقًا', 'إيقاف العمل والمتابعة'] : ['Later', 'Stop work and continue'],
+          defaultId: 0, cancelId: 0, noLink: true,
+        });
+        return result.response === 1;
+      },
+      pauseQueue: () => queue!.prepareForShutdown(),
+      stopProcesses: () => mediaEngine!.shutdown(),
+      flushDatabase: () => db!.flushForShutdown(),
+      recover: () => {
+        if (!mediaEngine!.hasActiveWork()) {
+          queue!.recoverFromShutdown();
+          mediaEngine!.recoverFromShutdown();
+        }
+      },
+    });
+    updateService.setPrepareShutdown(() => { protectUpdateData(); return shutdown!.prepare(); });
+    updateService.setAbortShutdown(() => shutdown!.reset());
 
     // 6. Create Window and Register IPC Handlers
     await createWindow(db, resolver, mediaEngine, queue, defaultDownloadsDir, updateService);
@@ -154,4 +216,22 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', (event) => {
+  if (updateService?.getState().status === 'downloaded') {
+    try { protectUpdateData(); } catch { /* Safe exit is allowed; update installation is disabled. */ }
+  }
+  if (!shutdown || shutdown.ready) return;
+  event.preventDefault();
+  void shutdown.prepare().then((ready) => {
+    if (ready) app.quit();
+  }).catch((error) => {
+    const ar = db?.getSettings(app.getPath('downloads')).language === 'ar';
+    void dialog.showMessageBox({ type: 'error',
+      title: ar ? 'تعذر الخروج بأمان' : 'Could not exit safely',
+      message: ar ? 'تم تأجيل الخروج والتحديث. لم يتم حذف أي بيانات. حاول مرة أخرى.' : 'Exit and update postponed. No data was deleted. Please try again.',
+    });
+    console.error('[Shutdown] Preparation failed:', error);
+  });
 });

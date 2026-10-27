@@ -111,11 +111,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-6 animate-fadeIn">
+    <div className="px-5 py-6 lg:px-8 lg:py-7 max-w-[1440px] mx-auto space-y-6 animate-fadeIn">
       {/* Top Search & Filter Bar */}
-      <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-4">
+      <div className="glass-acrylic p-5 rounded-[24px] border border-white/[0.08] space-y-4 shadow-xl">
         {/* Statistics Pill Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 text-xs pb-3 border-b border-slate-800/80">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs pb-3.5 border-b border-white/[0.06]">
           <div className="flex items-center gap-4 text-slate-300 font-medium">
             <span>
               {isAr ? 'إجمالي الملفات:' : 'Total Items:'}{' '}
@@ -126,7 +126,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               <strong className="text-indigo-400 font-mono">{formatBytes(totalSize)}</strong>
             </span>
             {missingFilesCount > 0 && (
-              <span className="text-amber-400 font-semibold flex items-center gap-1">
+              <span className="text-amber-400 font-semibold flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
                 <AlertTriangle className="w-3.5 h-3.5" />
                 <span>
                   {missingFilesCount} {isAr ? 'ملفات مفقودة أو منقولة' : 'files missing or moved'}
@@ -144,7 +144,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={isAr ? 'البحث في الوسائط المحفوظة بالعنوان...' : 'Search downloaded media by title...'}
-              className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              className="w-full glass-input rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-400 focus:outline-none"
             />
           </div>
 
@@ -153,7 +153,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             <select
               value={platformFilter}
               onChange={(e) => setPlatformFilter(e.target.value)}
-              className="bg-slate-900 border border-slate-700/80 text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
+              className="glass-input text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
             >
               <option value="all">{isAr ? 'جميع المنصات' : 'All Platforms'}</option>
               <option value="youtube">YouTube</option>
@@ -166,7 +166,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
-              className="bg-slate-900 border border-slate-700/80 text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
+              className="glass-input text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
             >
               <option value="all">{isAr ? 'جميع الصيغ' : 'All Formats'}</option>
               <option value="video">{isAr ? 'فيديو' : 'Videos'}</option>
@@ -177,7 +177,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-slate-900 border border-slate-700/80 text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
+              className="glass-input text-slate-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none"
             >
               <option value="date">{isAr ? 'ترتيب بالتاريخ' : 'Sort by Date'}</option>
               <option value="title">{isAr ? 'ترتيب بالاسم' : 'Sort by Title'}</option>
@@ -186,7 +186,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
             <button
               onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
-              className="p-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-slate-300 hover:text-white"
+              className="p-2.5 rounded-xl glass-acrylic hover:bg-white/[0.08] text-slate-300 hover:text-white transition-all cursor-pointer"
               title="Toggle sort direction"
             >
               <ArrowUpDown className="w-4 h-4" />
@@ -197,8 +197,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
       {/* Grid of Library Items */}
       {filteredHistory.length === 0 ? (
-        <div className="glass-card rounded-2xl p-12 text-center space-y-3 border border-slate-800">
-          <Film className="w-12 h-12 text-slate-600 mx-auto" />
+        <div className="glass-acrylic-card rounded-3xl p-12 text-center space-y-3 border border-white/[0.08] shadow-xl">
+          <Film className="w-12 h-12 text-slate-500 mx-auto" />
           <h3 className="text-base font-bold text-white">
             {isAr ? 'لا توجد وسائط مطابقة' : 'No media items found'}
           </h3>
@@ -217,10 +217,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             return (
               <div
                 key={item.id}
-                className="glass-card rounded-2xl p-4 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between space-y-3 group"
+                className="glass-acrylic-card rounded-2xl p-4.5 border border-white/[0.08] hover:border-indigo-500/30 transition-all flex flex-col justify-between space-y-3.5 group shadow-md"
               >
                 <div className="flex items-start gap-3.5">
-                  <div className="w-24 h-16 rounded-xl bg-slate-900 border border-slate-800 shrink-0 overflow-hidden relative">
+                  <div className="w-24 h-16 rounded-xl bg-slate-900 border border-white/[0.08] shrink-0 overflow-hidden relative shadow-sm">
                     {item.thumbnailUrl ? (
                       <img
                         src={item.thumbnailUrl}

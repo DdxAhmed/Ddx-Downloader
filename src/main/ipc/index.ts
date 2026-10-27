@@ -6,13 +6,24 @@ import { MediaEngine } from '../media/media-engine';
 import { DependencyResolver } from '../media/dependency-resolver';
 import { DownloadQueue } from '../queue/download-queue';
 import { UpdateService } from '../updater/update-service';
-import { buildOutputPath, sanitizeFilename } from '../media/filename-sanitizer';
+import { CourseService } from '../courses/course-service';
+import { SubtitleService } from '../subtitles/subtitle-service';
+import { DiskSpaceChecker } from '../storage/disk-space-checker';
+import { SizeEstimator } from '../media/size-estimator';
+import {
+  buildOutputPath,
+  sanitizeFilename,
+  validateTimeRange,
+} from '../media/filename-sanitizer';
 import {
   CreateDownloadRequest,
   PlaylistBatchDownloadRequest,
   DownloadJob,
   AppSettings,
   MediaConversionRequest,
+  SubtitleSearchQuery,
+  MediaFormat,
+  TimeRange,
 } from '../../types';
 
 let miniWindow: BrowserWindow | null = null;
@@ -26,6 +37,21 @@ export function registerIpcHandlers(
   defaultDownloadsDir: string,
   updateService?: UpdateService
 ): void {
+  const courseService = new CourseService(db, mediaEngine, queue);
+  const subtitleService = new SubtitleService(db);
+  const userApprovedDownloadDirectories = new Set<string>();
+
+  // Automatically index any subtitles downloaded alongside completed video jobs
+  if (mediaEngine && typeof (mediaEngine as any).setOnSubtitlesDownloaded === 'function') {
+    mediaEngine.setOnSubtitlesDownloaded((subPath, job) => {
+      subtitleService.indexSubtitleFile(subPath, {
+        mediaTitle: job.mediaTitle,
+        mediaId: job.id,
+        associatedMediaFile: job.outputPath,
+      });
+    });
+  }
+
   // Connect updater events to renderer
   if (updateService) {
     updateService.setOnStateChange((state) => {
@@ -98,24 +124,66 @@ export function registerIpcHandlers(
     }
   });
 
-  // 2. Start Single Download
+  // 2. Start Single Download (with optional Section / Time Range clipping & pre-check)
   ipcMain.handle('media:download', async (_event, req: CreateDownloadRequest) => {
     try {
-      if (!req || !req.url || !req.title) {
+      if (!req || typeof req.url !== 'string' || !req.url.trim() || typeof req.title !== 'string') {
         return { success: false, error: 'Invalid download parameters.' };
       }
 
+      // Runtime validation of time range if provided
+      if (req.timeRange) {
+        if (typeof req.timeRange.start !== 'number' || typeof req.timeRange.end !== 'number') {
+          return { success: false, error: 'Time range start and end must be valid numbers.' };
+        }
+        const validation = validateTimeRange(req.timeRange.start, req.timeRange.end, req.duration);
+        if (!validation.valid) {
+          return { success: false, error: validation.error || 'Invalid time range.' };
+        }
+        if (req.cutMode !== undefined && req.cutMode !== 'fast' && req.cutMode !== 'accurate') {
+          return { success: false, error: 'Invalid clip cutting mode.' };
+        }
+      }
+
       const settings = db.getSettings(defaultDownloadsDir);
+      const destinationDirectory = req.destinationDirectory
+        ? path.resolve(req.destinationDirectory)
+        : path.resolve(settings.downloadDirectory);
+      if (
+        req.destinationDirectory &&
+        destinationDirectory !== path.resolve(settings.downloadDirectory) &&
+        !userApprovedDownloadDirectories.has(destinationDirectory)
+      ) {
+        return { success: false, error: 'The destination folder was not selected through the application.' };
+      }
       const ext = req.isAudioOnly
         ? (req.container || 'mp3')
         : (req.container || settings.preferredContainer || 'mp4');
 
-      const outputPath = buildOutputPath(settings.downloadDirectory, req.title, ext, {
+      const outputPath = buildOutputPath(destinationDirectory, req.title, ext, {
         isPlaylist: !!req.playlistTitle,
         playlistTitle: req.playlistTitle,
         playlistIndex: req.playlistIndex,
         subfolder: req.customSubfolder,
+        timeRange: req.timeRange,
+        checkCollision: true,
       });
+
+      // Pre-check available disk space against estimated peak requirements
+      if (req.estimatedSizeBytes && req.estimatedSizeBytes > 0) {
+        const spaceCheck = DiskSpaceChecker.evaluateSpaceWithEstimates(
+          outputPath,
+          req.estimatedSizeBytes,
+          !req.isAudioOnly,
+          queue.getQueue()
+        );
+        if (spaceCheck.isInsufficient) {
+          return {
+            success: false,
+            error: `Insufficient disk space: Peak space of ${SizeEstimator.formatBytes(spaceCheck.estimatedPeakBytes)} required, but only ${SizeEstimator.formatBytes(spaceCheck.diskSpace.freeBytes || 0)} available on ${spaceCheck.diskSpace.path}.`,
+          };
+        }
+      }
 
       const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const speedLimit = req.speedLimit || settings.downloadSpeedLimit;
@@ -146,6 +214,12 @@ export function registerIpcHandlers(
         playlistIndex: req.playlistIndex,
         selectedSubtitles: req.selectedSubtitles,
         embedSubtitles: req.embedSubtitles,
+        timeRange: req.timeRange,
+        cutMode: req.timeRange ? (req.cutMode || 'fast') : undefined,
+        estimatedSizeBytes: req.estimatedSizeBytes,
+        sizeEstimationType: req.sizeEstimationType,
+        courseId: req.courseId,
+        courseItemId: req.courseItemId,
       };
 
       queue.addJob(job);
@@ -175,6 +249,7 @@ export function registerIpcHandlers(
           isPlaylist: true,
           playlistTitle: req.organizeInFolder ? req.playlistTitle : undefined,
           playlistIndex: item.index,
+          checkCollision: true,
         });
 
         const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -216,21 +291,25 @@ export function registerIpcHandlers(
 
   // 4. Cancel, Pause, Resume, and Retry
   ipcMain.handle('media:cancel', async (_event, jobId: string) => {
+    if (typeof jobId !== 'string') return { success: false };
     const success = queue.cancelJob(jobId);
     return { success };
   });
 
   ipcMain.handle('media:pause', async (_event, jobId: string) => {
+    if (typeof jobId !== 'string') return { success: false };
     const success = queue.pauseJob(jobId);
     return { success };
   });
 
   ipcMain.handle('media:resume', async (_event, jobId: string) => {
+    if (typeof jobId !== 'string') return { success: false };
     const success = queue.resumeJob(jobId);
     return { success };
   });
 
   ipcMain.handle('media:retry', async (_event, jobId: string) => {
+    if (typeof jobId !== 'string') return { success: false };
     const success = queue.retryJob(jobId);
     return { success };
   });
@@ -269,10 +348,18 @@ export function registerIpcHandlers(
       outDir?: string,
       title?: string
     ) => {
+      if (!url || typeof url !== 'string') {
+        return { success: false, error: 'URL is required' };
+      }
       const settings = db.getSettings(defaultDownloadsDir);
       const targetDir = outDir || settings.downloadDirectory;
       const targetTitle = title || 'subtitles';
-      return mediaEngine.downloadStandaloneSubtitle(url, lang, format, targetDir, targetTitle);
+      const res = await mediaEngine.downloadStandaloneSubtitle(url, lang, format, targetDir, targetTitle);
+      if (res.success && res.filePath) {
+        // Automatically index newly downloaded standalone subtitle
+        await subtitleService.indexSubtitleFile(res.filePath, { mediaTitle: targetTitle, language: lang });
+      }
+      return res;
     }
   );
 
@@ -341,20 +428,27 @@ export function registerIpcHandlers(
 
   // 8. Disk Space and Storage Operations
   ipcMain.handle('storage:checkFreeSpace', async (_event, dirPath?: string) => {
-    try {
-      const target = dirPath || db.getSettings(defaultDownloadsDir).downloadDirectory;
-      if (fs.existsSync(target) && (fs as any).statfsSync) {
-        const stat = (fs as any).statfsSync(target);
-        return {
-          freeBytes: stat.bavail * stat.bsize,
-          totalBytes: stat.blocks * stat.bsize,
-        };
-      }
-    } catch (err) {
-      console.warn('[Storage] Could not check free space via statfsSync:', err);
-    }
-    return { freeBytes: 100 * 1024 * 1024 * 1024, totalBytes: 500 * 1024 * 1024 * 1024 };
+    const target = dirPath || db.getSettings(defaultDownloadsDir).downloadDirectory;
+    return DiskSpaceChecker.getFreeDiskSpace(target);
   });
+
+  ipcMain.handle(
+    'storage:checkDiskSpaceWithEstimates',
+    async (
+      _event,
+      dirPath: string | undefined,
+      estimatedBytes: number,
+      isSeparateStreams?: boolean
+    ) => {
+      const target = dirPath || db.getSettings(defaultDownloadsDir).downloadDirectory;
+      return DiskSpaceChecker.evaluateSpaceWithEstimates(
+        target,
+        Number(estimatedBytes) || 0,
+        Boolean(isSeparateStreams),
+        queue.getQueue()
+      );
+    }
+  );
 
   ipcMain.handle('storage:cleanTemp', async () => {
     try {
@@ -405,6 +499,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle('history:delete', async (_event, id: string, deleteFile?: boolean) => {
     try {
+      if (typeof id !== 'string') return { success: false, error: 'ID is required' };
       if (deleteFile) {
         const entries = db.getHistory();
         const target = entries.find((e) => e.id === id);
@@ -430,6 +525,9 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle('settings:update', async (_event, newSettings: Partial<AppSettings>) => {
+    if (!newSettings || typeof newSettings !== 'object') {
+      return { success: false, error: 'Invalid settings object' };
+    }
     const updated = db.updateSettings(newSettings, defaultDownloadsDir);
     if (newSettings.maxConcurrentDownloads) {
       queue.setMaxConcurrent(newSettings.maxConcurrentDownloads);
@@ -453,8 +551,9 @@ export function registerIpcHandlers(
     if (result.canceled || result.filePaths.length === 0) {
       return { success: false };
     }
-
-    return { success: true, path: result.filePaths[0] };
+    const selectedPath = path.resolve(result.filePaths[0]);
+    userApprovedDownloadDirectories.add(selectedPath);
+    return { success: true, path: selectedPath };
   });
 
   // 12. Dependencies Check
@@ -464,7 +563,7 @@ export function registerIpcHandlers(
 
   // 13. Safe Shell Operations
   ipcMain.handle('shell:openFile', async (_event, filePath: string) => {
-    if (!filePath || !fs.existsSync(filePath)) {
+    if (!filePath || typeof filePath !== 'string' || !fs.existsSync(filePath)) {
       return { success: false, error: 'File does not exist on disk.' };
     }
     await shell.openPath(filePath);
@@ -472,7 +571,7 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle('shell:openFolder', async (_event, filePath: string) => {
-    if (!filePath) {
+    if (!filePath || typeof filePath !== 'string') {
       return { success: false, error: 'Path is required.' };
     }
     if (fs.existsSync(filePath)) {
@@ -490,6 +589,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle('shell:openExternal', async (_event, targetUrl: string) => {
     try {
+      if (!targetUrl || typeof targetUrl !== 'string') return { success: false };
       const parsed = new URL(targetUrl);
       if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
         await shell.openExternal(targetUrl);
@@ -504,7 +604,7 @@ export function registerIpcHandlers(
   // 14. App Info
   ipcMain.handle('app:getInfo', async () => {
     return {
-      version: app.getVersion() || '1.0.0',
+      version: app.getVersion() || '2.0.0',
       platform: process.platform,
       userDataPath: app.getPath('userData'),
       downloadsPath: defaultDownloadsDir,
@@ -600,7 +700,7 @@ export function registerIpcHandlers(
     if (!updateService) {
       return {
         status: 'idle',
-        currentVersion: app.getVersion() || '1.0.0',
+        currentVersion: app.getVersion() || '2.0.0',
         updateInfo: null,
         progress: null,
         error: 'Update service unavailable',
@@ -608,5 +708,134 @@ export function registerIpcHandlers(
       };
     }
     return updateService.getState();
+  });
+
+  // -------------------------------------------------------------------------
+  // 17. Course & Playlist Library Handlers (Feature 2)
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle('courses:save', async (_event, courseData) => {
+    if (!courseData || typeof courseData.title !== 'string' || typeof courseData.sourceUrl !== 'string') {
+      return { success: false, error: 'Invalid course data.' };
+    }
+    return courseService.saveCourse(courseData);
+  });
+
+  ipcMain.handle('courses:getAll', async () => {
+    return courseService.getCoursesWithItems();
+  });
+
+  ipcMain.handle('courses:get', async (_event, courseId: string) => {
+    if (typeof courseId !== 'string') return null;
+    return courseService.getCourseWithItems(courseId);
+  });
+
+  ipcMain.handle('courses:sync', async (_event, courseId: string) => {
+    if (typeof courseId !== 'string') return { success: false, error: 'Course ID is required.' };
+    return courseService.syncCourse(courseId);
+  });
+
+  ipcMain.handle('courses:downloadItems', async (_event, courseId: string, itemIds: string[], options) => {
+    if (typeof courseId !== 'string' || !Array.isArray(itemIds)) {
+      return { success: false, error: 'Invalid course download parameters.' };
+    }
+    return courseService.downloadCourseItems(courseId, itemIds, options);
+  });
+
+  ipcMain.handle('courses:delete', async (_event, courseId: string, deleteFiles = false) => {
+    if (typeof courseId !== 'string') return { success: false, error: 'Course ID is required.' };
+    return courseService.deleteCourse(courseId, Boolean(deleteFiles));
+  });
+
+  // -------------------------------------------------------------------------
+  // 18. Subtitle Search & Playback Handlers (Feature 3)
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle('subtitles:search', async (_event, query: SubtitleSearchQuery) => {
+    if (!query || typeof query.query !== 'string') {
+      return { results: [], total: 0, page: 1, pageSize: 20, totalPages: 0 };
+    }
+    return subtitleService.searchSubtitles(query);
+  });
+
+  ipcMain.handle('subtitles:importFiles', async (_event, filePaths?: string[]) => {
+    let targets = filePaths;
+    if (!targets || !Array.isArray(targets) || targets.length === 0) {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Select Subtitle Files (SRT or VTT)',
+        filters: [{ name: 'Subtitles', extensions: ['srt', 'vtt'] }],
+        properties: ['openFile', 'multiSelections'],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, indexedCount: 0 };
+      }
+      targets = result.filePaths;
+    }
+
+    const indexedCount = await subtitleService.importSubtitleFiles(targets);
+    return { success: true, indexedCount };
+  });
+
+  ipcMain.handle('subtitles:importFolder', async (_event, folderPath?: string) => {
+    let targetDir = folderPath;
+    if (!targetDir || typeof targetDir !== 'string') {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Select Folder Containing Subtitles',
+        properties: ['openDirectory'],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, indexedCount: 0 };
+      }
+      targetDir = result.filePaths[0];
+    }
+
+    const indexedCount = await subtitleService.importSubtitleFolder(targetDir);
+    return { success: true, indexedCount };
+  });
+
+  ipcMain.handle('subtitles:playAtTimestamp', async (_event, mediaPath: string, timestampSeconds: number) => {
+    if (typeof mediaPath !== 'string' || typeof timestampSeconds !== 'number') {
+      return { success: false, error: 'Invalid media path or timestamp' };
+    }
+    const settings = db.getSettings(defaultDownloadsDir);
+    return subtitleService.playMediaAtTimestamp(mediaPath, timestampSeconds, settings.customMediaPlayerPath);
+  });
+
+  ipcMain.handle('subtitles:getPlayers', async () => {
+    return subtitleService.getDetectedMediaPlayers();
+  });
+
+  // -------------------------------------------------------------------------
+  // 19. Sizing & Metadata Estimates (Feature 4)
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle(
+    'media:estimateFormatSize',
+    async (_event, format?: MediaFormat, duration?: number, isAudioOnly = false,
+      audioFormat?: MediaFormat, targetContainer?: string, timeRange?: TimeRange) => {
+      return SizeEstimator.estimateFormatSize(format, duration, Boolean(isAudioOnly),
+        audioFormat, targetContainer, timeRange);
+    }
+  );
+
+  ipcMain.handle(
+    'media:estimatePlaylistSize',
+    async (
+      _event,
+      items: Array<{ id: string; url: string; duration?: number; filesize?: number }>,
+      qualityLabel?: string,
+      formatId?: string,
+      isAudioOnly = false
+    ) => {
+      if (!Array.isArray(items)) {
+        return { totalBytes: 0, knownCount: 0, unknownCount: 0, totalCount: 0, isComplete: true };
+      }
+      return SizeEstimator.estimatePlaylistSize(items, qualityLabel, formatId, Boolean(isAudioOnly));
+    }
+  );
+
+  ipcMain.handle('media:fetchPlaylistItemSizes', async (_event, _playlistUrl: string, itemUrls: string[]) => {
+    if (!Array.isArray(itemUrls)) return {};
+    return mediaEngine.fetchPlaylistItemSizes(itemUrls);
   });
 }

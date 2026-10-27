@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   Clipboard,
@@ -21,6 +21,10 @@ import {
   Play,
   Gauge,
   Sliders,
+  Scissors,
+  HardDrive,
+  Info,
+  BookmarkPlus,
 } from 'lucide-react';
 import {
   MediaInfo,
@@ -29,8 +33,34 @@ import {
   PlaylistBatchDownloadRequest,
   DownloadJob,
   DuplicateCheckResult,
+  TimeRange,
+  SizeEstimate,
+  DiskSpaceCheckResult,
+  MediaChapter,
 } from '../../types';
-import { SupportedLanguage } from '../i18n';
+import { SupportedLanguage, getTranslation } from '../i18n';
+
+function parseTimestamp(input: string | number): number | null {
+  if (typeof input === 'number') {
+    return isNaN(input) || input < 0 ? null : input;
+  }
+  const clean = input.trim();
+  if (!clean) return null;
+  if (/^\d+(\.\d+)?$/.test(clean)) {
+    const val = parseFloat(clean);
+    return isNaN(val) || val < 0 ? null : val;
+  }
+  const parts = clean.split(':').map((p) => parseFloat(p));
+  if (parts.some((p) => isNaN(p) || p < 0)) return null;
+  if (parts.length === 2) {
+    if (parts[1] >= 60) return null;
+    return parts[0] * 60 + parts[1];
+  } else if (parts.length === 3) {
+    if (parts[1] >= 60 || parts[2] >= 60) return null;
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return null;
+}
 
 interface HomeViewProps {
   onStartDownload: (req: CreateDownloadRequest) => Promise<boolean>;
@@ -50,6 +80,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   lang,
 }) => {
   const isAr = lang === 'ar';
+  const t = (key: string) => getTranslation(key, lang);
   const [url, setUrl] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzedMedia, setAnalyzedMedia] = useState<MediaInfo | null>(null);
@@ -58,6 +89,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   // Tab inside media card: 'video' | 'audio' | 'subtitles'
   const [activeMediaTab, setActiveMediaTab] = useState<'video' | 'audio' | 'subtitles'>('video');
+
+  // Feature 1: Section Clip / Time Range state
+  const [enableSectionClip, setEnableSectionClip] = useState(false);
+  const [clipStartStr, setClipStartStr] = useState('');
+  const [clipEndStr, setClipEndStr] = useState('');
+  const [clipLabel, setClipLabel] = useState('');
+  const [selectedChapterIdx, setSelectedChapterIdx] = useState<number>(-1);
+  const [clipValidationErr, setClipValidationErr] = useState<string | null>(null);
+  const [clipDurationSec, setClipDurationSec] = useState<number | null>(null);
+  const [cutMode, setCutMode] = useState<'fast' | 'accurate'>('fast');
+  const [clipDestination, setClipDestination] = useState<string | undefined>();
+  const [ffmpegAvailable, setFfmpegAvailable] = useState(true);
+
+  // Feature 4: Size Estimation & Disk Space state
+  const [sizeEstimate, setSizeEstimate] = useState<SizeEstimate | null>(null);
+  const [diskSpaceResult, setDiskSpaceResult] = useState<DiskSpaceCheckResult | null>(null);
+
+  // Feature 2: Save Course state
+  const [isSavingCourse, setIsSavingCourse] = useState(false);
 
   // Selected format state
   const [selectedFormatId, setSelectedFormatId] = useState<string>('bestvideo+bestaudio/best');
@@ -101,6 +151,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
     setError(null);
     setAnalyzedMedia(null);
     setDuplicateInfo(null);
+    setEnableSectionClip(false);
+    setClipStartStr('');
+    setClipEndStr('');
+    setClipLabel('');
+    setSelectedChapterIdx(-1);
+    setClipValidationErr(null);
+    setClipDurationSec(null);
+    setClipDestination(undefined);
 
     try {
       // 1. Check duplicate status
@@ -138,6 +196,178 @@ export const HomeView: React.FC<HomeViewProps> = ({
       setError(err.message || 'An unexpected error occurred.');
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const unsubscribe = window.electronAPI?.onDependencyStatusChanged((status) => {
+      if (mounted) setFfmpegAvailable(status.ffmpeg.available);
+    });
+    if (window.electronAPI?.checkDependencies) {
+      window.electronAPI
+        .checkDependencies()
+        .then((res) => {
+          if (mounted && res?.ffmpeg) {
+            setFfmpegAvailable(res.ffmpeg.available);
+          }
+        })
+        .catch(() => {});
+    }
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!enableSectionClip) {
+      setClipValidationErr(null);
+      setClipDurationSec(null);
+      return;
+    }
+    const s = parseTimestamp(clipStartStr);
+    const e = parseTimestamp(clipEndStr);
+    if (s === null || e === null) {
+      setClipValidationErr(
+        isAr
+          ? 'يرجى إدخال وقتي البدء والانتهاء بصيغة صالحة (مثال 01:30 أو 00:01:30)'
+          : 'Please enter valid start and end times (e.g. 01:30 or 00:01:30)'
+      );
+      setClipDurationSec(null);
+      return;
+    }
+    if (s < 0 || e <= s) {
+      setClipValidationErr(t('invalidRangeError'));
+      setClipDurationSec(null);
+      return;
+    }
+    if (analyzedMedia?.duration && e > analyzedMedia.duration) {
+      setClipValidationErr(t('endExceedsDuration'));
+      setClipDurationSec(null);
+      return;
+    }
+    setClipValidationErr(null);
+    setClipDurationSec(e - s);
+  }, [enableSectionClip, clipStartStr, clipEndStr, analyzedMedia?.duration, isAr]);
+
+  useEffect(() => {
+    if (!analyzedMedia || analyzedMedia.isPlaylist) {
+      setSizeEstimate(null);
+      setDiskSpaceResult(null);
+      return;
+    }
+
+    let isMounted = true;
+    const runEstimate = async () => {
+      try {
+        const isAudio = activeMediaTab === 'audio';
+        const audioFormat = analyzedMedia.formats.filter((f) => f.isAudioOnly)
+          .sort((a, b) => (b.tbr || 0) - (a.tbr || 0))[0];
+        const fmt = isAudio ? audioFormat :
+          analyzedMedia.formats.find((f) => f.formatId === selectedFormatId) ||
+          analyzedMedia.formats.filter((f) => !f.isAudioOnly)
+            .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.tbr || 0) - (a.tbr || 0))[0];
+        const cont = isAudio ? selectedAudioFormat : selectedContainer;
+
+        let range: TimeRange | undefined = undefined;
+        if (enableSectionClip && !clipValidationErr) {
+          const s = parseTimestamp(clipStartStr);
+          const e = parseTimestamp(clipEndStr);
+          if (s !== null && e !== null && e > s) {
+            range = { start: s, end: e, label: clipLabel || undefined };
+          }
+        }
+
+        if (window.electronAPI?.estimateFormatSize) {
+          const est = await window.electronAPI.estimateFormatSize(
+            fmt,
+            analyzedMedia.duration,
+            isAudio,
+            audioFormat,
+            cont,
+            range
+          );
+          if (!isMounted) return;
+          setSizeEstimate(est);
+
+          if (window.electronAPI?.checkDiskSpaceWithEstimates) {
+            const ds = await window.electronAPI.checkDiskSpaceWithEstimates(
+              undefined,
+              est.bytes,
+              !isAudio && !!fmt?.isVideoOnly
+            );
+            if (!isMounted) return;
+            if (!isMounted) return;
+            setDiskSpaceResult(ds);
+          }
+        }
+      } catch (err) {
+        console.error('Error calculating size estimate:', err);
+      }
+    };
+
+    runEstimate();
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    analyzedMedia,
+    selectedFormatId,
+    activeMediaTab,
+    selectedAudioFormat,
+    selectedContainer,
+    enableSectionClip,
+    clipStartStr,
+    clipEndStr,
+    clipValidationErr,
+    clipLabel,
+  ]);
+
+  const handleSelectChapter = (idx: number) => {
+    setSelectedChapterIdx(idx);
+    if (!analyzedMedia?.chapters || idx < 0 || idx >= analyzedMedia.chapters.length) return;
+    const ch = analyzedMedia.chapters[idx];
+    setClipStartStr(formatDuration(ch.startTime));
+    setClipEndStr(formatDuration(ch.endTime));
+    setClipLabel(ch.title);
+  };
+
+  const handleSaveCourse = async () => {
+    if (!analyzedMedia || !analyzedMedia.isPlaylist) return;
+    if (!window.electronAPI?.saveCourse) return;
+    setIsSavingCourse(true);
+    try {
+      const settings = await window.electronAPI.getSettings();
+      const res = await window.electronAPI.saveCourse({
+        sourceUrl: analyzedMedia.url,
+        platform: analyzedMedia.platform,
+        providerPlaylistId: analyzedMedia.id,
+        destinationFolder: settings.downloadDirectory,
+        title: analyzedMedia.playlistTitle || analyzedMedia.title,
+        thumbnailUrl: analyzedMedia.thumbnail,
+        preferredQuality: selectedQualityLabel,
+        preferredContainer: activeMediaTab === 'audio' ? selectedAudioFormat : selectedContainer,
+        isAudioOnly: activeMediaTab === 'audio',
+        selectedSubtitles,
+        items: (analyzedMedia.playlistItems || []).map((item) => ({
+          sourceMediaId: item.id,
+          title: item.title,
+          url: item.url,
+          index: item.index,
+          duration: item.duration,
+          thumbnailUrl: item.thumbnail,
+        })),
+      });
+      if (res.success) {
+        onShowToast(t('courseSavedSuccess'), 'success');
+      } else {
+        onShowToast(res.error || 'Failed to save course', 'error');
+      }
+    } catch (err: any) {
+      onShowToast(err.message, 'error');
+    } finally {
+      setIsSavingCourse(false);
     }
   };
 
@@ -181,6 +411,29 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const handleDownloadSingle = async (isAudio: boolean) => {
     if (!analyzedMedia) return;
 
+    let timeRange: TimeRange | undefined = undefined;
+    if (enableSectionClip) {
+      if (!ffmpegAvailable) {
+        onShowToast(t('ffmpegRequiredForClips'), 'error');
+        return;
+      }
+      if (clipValidationErr) {
+        onShowToast(clipValidationErr, 'error');
+        return;
+      }
+      const s = parseTimestamp(clipStartStr);
+      const e = parseTimestamp(clipEndStr);
+      if (s === null || e === null || e <= s) {
+        onShowToast(t('invalidRangeError'), 'error');
+        return;
+      }
+      timeRange = {
+        start: s,
+        end: e,
+        label: clipLabel ? clipLabel.trim() : undefined,
+      };
+    }
+
     const req: CreateDownloadRequest = {
       url: analyzedMedia.url,
       title: analyzedMedia.title,
@@ -194,12 +447,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
       selectedSubtitles: selectedSubtitles.length > 0 ? selectedSubtitles : undefined,
       embedSubtitles: embedSubtitles && selectedSubtitles.length > 0,
       speedLimit: speedLimit !== 'unlimited' ? speedLimit : undefined,
+      timeRange,
+      cutMode: timeRange ? cutMode : undefined,
+      destinationDirectory: timeRange ? clipDestination : undefined,
+      estimatedSizeBytes: sizeEstimate?.bytes,
+      sizeEstimationType: sizeEstimate?.type,
     };
 
     const success = await onStartDownload(req);
     if (success) {
       onShowToast(
-        isAr ? `تمت إضافة "${analyzedMedia.title.substring(0, 30)}..." إلى قائمة التنزيل!` : `Queued "${analyzedMedia.title.substring(0, 30)}..." for download!`,
+        isAr
+          ? `تمت إضافة "${analyzedMedia.title.substring(0, 30)}..." إلى قائمة التنزيل!`
+          : `Queued "${analyzedMedia.title.substring(0, 30)}..." for download!`,
         'success'
       );
     }
@@ -302,40 +562,60 @@ export const HomeView: React.FC<HomeViewProps> = ({
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-8 animate-fadeIn">
+    <div className="px-5 py-6 lg:px-8 lg:py-7 max-w-[1440px] mx-auto space-y-6 animate-fadeIn">
       {/* Hero Welcome Section */}
-      <div className="relative overflow-hidden rounded-3xl p-8 bg-gradient-to-br from-indigo-950/60 via-[#0d1322] to-slate-900 border border-slate-800 shadow-2xl">
-        <div className="absolute -top-24 -right-24 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+      {!analyzedMedia && (
+        <div className="glass-acrylic relative overflow-hidden rounded-[26px] p-7 lg:p-8 border border-white/[0.08] shadow-2xl">
+          <div className="absolute -top-28 -right-28 w-96 h-96 bg-gradient-to-br from-indigo-500/20 via-purple-500/15 to-transparent rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-28 -left-28 w-96 h-96 bg-gradient-to-tr from-cyan-500/15 via-blue-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 max-w-2xl space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>{isAr ? 'محرك تنزيل محلي فائق السرعة' : 'High-Speed Local Media Downloader'}</span>
+          <div className="relative z-10 max-w-2xl space-y-3.5">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-indigo-500/15 via-purple-500/15 to-cyan-500/15 border border-indigo-500/30 text-indigo-300 text-xs font-semibold shadow-sm">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+              <span>{isAr ? 'محرك التنزيل السريع 100% محلي وبدون قيود' : 'High-Speed Local Media Engine • 100% Private'}</span>
+            </div>
+            <h1 className="text-2xl lg:text-[32px] font-black tracking-tight leading-tight bg-gradient-to-r from-white via-slate-100 to-indigo-200 bg-clip-text text-transparent">
+              {isAr ? 'تنزيل مقاطع الفيديو، الدورات، والصوتيات' : 'Download Videos, Playlists & Complete Courses'}
+            </h1>
+            <p className="text-slate-300 text-sm leading-relaxed max-w-xl">
+              {isAr
+                ? 'نزّل أي فيديو أو قائمة تشغيل أو دورة تعليمية كاملة بدقة تصل إلى 4K والصوت الأصلي مباشرة إلى جهازك وبدون أي إعلانات أو قيود سحابية.'
+                : 'Fast, offline-first media downloader. Extract 4K videos, full course curricula, chapters, subtitles, and high-fidelity audio straight to your storage.'}
+            </p>
           </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight leading-tight">
-            {isAr ? 'تنزيل الدورات التعليمية ومقاطع الفيديو وقوائم التشغيل' : 'Download Educational Courses, Videos & Playlists'}
-          </h1>
-          <p className="text-slate-300 text-sm leading-relaxed">
-            {isAr
-              ? 'سريع وآمن وخاص ومحلي 100%. نزّل دورات يوتيوب الكاملة، المحاضرات، المقاطع بجودات تصل إلى 4K، والصوتيات مباشرة إلى جهازك.'
-              : 'Fast, private, and offline-first. Download YouTube courses, lectures, high-resolution videos, and audio directly to your computer.'}
-          </p>
-        </div>
 
-        {/* Supported Providers Pills */}
-        <div className="mt-6 flex flex-wrap items-center gap-2 pt-4 border-t border-slate-800/60 text-xs text-slate-400">
-          <span className="font-semibold text-slate-300">{isAr ? 'المنصات المدعومة:' : 'Supported:'}</span>
-          <span className="px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 font-medium">YouTube</span>
-          <span className="px-2.5 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-400 font-medium">{isAr ? 'قوائم التشغيل والدورات' : 'Playlists & Courses'}</span>
-          <span className="px-2.5 py-1 rounded-md bg-pink-500/10 border border-pink-500/20 text-pink-400 font-medium">Instagram Reels</span>
-          <span className="px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 font-medium">Vimeo</span>
-          <span className="px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-300 font-medium">+ 1000s of Web Media</span>
+          {/* Supported Providers Pills */}
+          <div className="mt-6 flex flex-wrap items-center gap-2 pt-4 border-t border-white/[0.06] text-xs">
+            <span className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider">{isAr ? 'المنصات المدعومة:' : 'Supported:'}</span>
+            <span className="px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/25 text-red-400 font-semibold flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+              YouTube & Shorts
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/25 text-purple-300 font-semibold flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+              {isAr ? 'الدورات وقوائم التشغيل' : 'Courses & Playlists'}
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-pink-500/10 border border-pink-500/25 text-pink-400 font-semibold flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-400"></span>
+              Instagram Reels
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/25 text-cyan-400 font-semibold flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+              TikTok
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/25 text-blue-400 font-semibold flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+              Facebook & Vimeo
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-white/[0.05] border border-white/[0.08] text-slate-300 font-medium">
+              + 1000s of Web Media
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* URL Input Box */}
-      <div className="glass-panel p-3 rounded-2xl shadow-2xl border border-slate-700/60 transition-all focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20">
+      <div className="glass-acrylic p-2 rounded-2xl border border-white/[0.08] transition-all duration-300 focus-within:border-indigo-500/80 focus-within:shadow-[0_0_35px_rgba(99,102,241,0.22)]">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -343,7 +623,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           }}
           className="flex items-center gap-2"
         >
-          <div className="pl-3 text-slate-400">
+          <div className="pl-3.5 text-slate-400">
             <Search className="w-5 h-5 text-indigo-400" />
           </div>
 
@@ -356,27 +636,43 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 ? 'الصق رابط الفيديو أو الدورة أو قائمة التشغيل هنا...'
                 : 'Paste video, course or playlist URL here (e.g. https://www.youtube.com/watch?v=...)'
             }
-            className="flex-1 bg-transparent border-0 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-0 px-2 py-3"
+            className="flex-1 bg-transparent border-0 text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-0 px-2 py-3.5"
           />
+
+          {url.trim() && (
+            <button
+              type="button"
+              onClick={() => {
+                setUrl('');
+                setAnalyzedMedia(null);
+                setError(null);
+              }}
+              className="px-2 py-1 text-xs text-slate-400 hover:text-white transition-colors"
+              title={isAr ? 'مسح' : 'Clear'}
+            >
+              ✕
+            </button>
+          )}
 
           <button
             type="button"
             onClick={handlePaste}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all"
-            title="Paste from clipboard"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold glass-acrylic hover:bg-white/[0.08] text-slate-200 hover:text-white border border-white/[0.08] transition-all shadow-sm"
+            title="Paste from clipboard (Ctrl+V)"
           >
-            <Clipboard className="w-3.5 h-3.5" />
+            <Clipboard className="w-3.5 h-3.5 text-indigo-400" />
             <span>{isAr ? 'لصق' : 'Paste'}</span>
+            <span className="hidden sm:inline text-[10px] font-mono px-1 py-0.2 rounded bg-white/[0.06] text-slate-400">Ctrl+V</span>
           </button>
 
           <button
             type="submit"
             disabled={isAnalyzing || !url.trim()}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-600/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            className="btn-glow-primary flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all"
           >
             {isAnalyzing ? (
               <>
-                <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 <span>{isAr ? 'جاري الفحص...' : 'Analyzing...'}</span>
               </>
             ) : (
@@ -467,16 +763,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {/* Media Analysis Result */}
       {analyzedMedia && (
-        <div className="glass-card rounded-2xl overflow-hidden border border-slate-700 shadow-2xl space-y-6 p-6">
+        <div className="glass-acrylic-card rounded-[28px] overflow-hidden space-y-6 p-6 lg:p-7 border border-white/[0.08] shadow-2xl">
           {/* Header Row: Thumbnail, Info, Channel */}
           <div className="flex flex-col md:flex-row gap-6">
-            <div className="relative w-full md:w-72 h-44 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 shrink-0 group">
+            <div className="relative w-full md:w-[380px] h-[220px] rounded-2xl overflow-hidden bg-slate-900/90 border border-white/[0.08] shrink-0 group shadow-xl">
               {analyzedMedia.thumbnail ? (
-                <img
-                  src={analyzedMedia.thumbnail}
-                  alt={analyzedMedia.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
+                <>
+                  <div
+                    className="absolute inset-0 bg-cover bg-center blur-2xl opacity-40 scale-110 pointer-events-none"
+                    style={{ backgroundImage: `url(${analyzedMedia.thumbnail})` }}
+                  />
+                  <img
+                    src={analyzedMedia.thumbnail}
+                    alt={analyzedMedia.title}
+                    className="relative z-10 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                </>
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-slate-600">
                   <Video className="w-12 h-12" />
@@ -484,33 +786,33 @@ export const HomeView: React.FC<HomeViewProps> = ({
               )}
 
               {analyzedMedia.duration && (
-                <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 backdrop-blur-sm text-[11px] font-mono text-white flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
+                <div className="absolute bottom-2.5 right-2.5 z-20 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-mono font-bold text-white flex items-center gap-1.5 shadow-md border border-white/10">
+                  <Clock className="w-3 h-3 text-cyan-400" />
                   <span>{formatDuration(analyzedMedia.duration)}</span>
                 </div>
               )}
 
               {analyzedMedia.isPlaylist && (
-                <div className="absolute top-2 left-2 px-2.5 py-1 rounded bg-indigo-600/90 text-xs font-bold text-white flex items-center gap-1 shadow-md">
+                <div className="absolute top-2.5 left-2.5 z-20 px-3 py-1 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-xs font-extrabold text-white flex items-center gap-1.5 shadow-lg shadow-indigo-600/40 border border-white/20">
                   <ListVideo className="w-3.5 h-3.5" />
-                  <span>{isAr ? 'دورة / قائمة' : 'Course / Playlist'} ({analyzedMedia.playlistItemCount || 0} {isAr ? 'درس' : 'items'})</span>
+                  <span>{isAr ? 'دورة / قائمة تشغيل' : 'Course / Playlist'} ({analyzedMedia.playlistItemCount || 0} {isAr ? 'درس' : 'items'})</span>
                 </div>
               )}
             </div>
 
-            <div className="flex-1 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[11px] font-semibold uppercase tracking-wider">
+            <div className="flex-1 space-y-2.5 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-[11px] font-bold uppercase tracking-wider">
                   {analyzedMedia.platform}
                 </span>
                 {analyzedMedia.isPlaylist && (
-                  <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[11px] font-semibold">
-                    {isAr ? 'قائمة تشغيل منظمة' : 'Structured Playlist'}
+                  <span className="px-2.5 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold">
+                    {isAr ? 'دورة تعليمية منظمة' : 'Structured Course'}
                   </span>
                 )}
               </div>
 
-              <h2 className="text-xl font-bold text-white leading-snug">
+              <h2 className="text-xl lg:text-2xl font-black text-white leading-snug tracking-tight">
                 {analyzedMedia.title}
               </h2>
 
@@ -540,27 +842,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
 
           {/* Quality Profiles Bar */}
-          <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <span className="text-slate-400 font-semibold flex items-center gap-1.5">
-              <Sliders className="w-3.5 h-3.5 text-indigo-400" />
-              <span>{isAr ? 'التشكيل الافتراضي:' : 'Quality Profile:'}</span>
+          <div className="p-3.5 rounded-2xl glass-acrylic border border-white/[0.08] flex flex-wrap items-center justify-between gap-3 text-xs">
+            <span className="text-slate-300 font-bold flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-indigo-400" />
+              <span>{isAr ? 'التشكيل السريع للجودة:' : 'Quality Preset:'}</span>
             </span>
 
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
               {[
-                { id: 'best' as const, label: isAr ? 'أفضل جودة' : 'Best Quality' },
+                { id: 'best' as const, label: isAr ? 'أفضل جودة (تلقائي)' : 'Best Quality (Auto)' },
                 { id: '1080p' as const, label: '1080p Full HD' },
                 { id: '720p' as const, label: '720p HD' },
-                { id: 'small' as const, label: isAr ? 'حجم أصغر (480p)' : 'Smaller File (480p)' },
+                { id: 'small' as const, label: isAr ? 'حجم أصغر (480p)' : 'Data Saver (480p)' },
                 { id: 'audio' as const, label: isAr ? 'صوت فقط (MP3)' : 'Audio Only' },
               ].map((p) => (
                 <button
                   key={p.id}
                   onClick={() => applyProfile(p.id)}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
                     activeProfile === p.id
-                      ? 'bg-indigo-600 text-white shadow'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-white'
+                      ? 'btn-glow-primary shadow-md'
+                      : 'glass-acrylic text-slate-300 hover:text-white hover:border-white/20'
                   }`}
                 >
                   {p.label}
@@ -570,15 +872,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
 
           {/* Media Option Tabs */}
-          <div className="border-t border-slate-800 pt-4">
-            <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
-              <div className="flex items-center gap-2">
+          <div className="border-t border-white/[0.08] pt-5">
+            <div className="flex flex-wrap items-center justify-between border-b border-white/[0.06] pb-4 gap-3">
+              <div className="flex items-center gap-2 p-1 rounded-2xl bg-black/20 border border-white/[0.06]">
                 <button
                   onClick={() => setActiveMediaTab('video')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                     activeMediaTab === 'video'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      ? 'btn-glow-primary shadow-lg shadow-indigo-500/25'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
                   }`}
                 >
                   <Video className="w-4 h-4" />
@@ -587,10 +889,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                 <button
                   onClick={() => setActiveMediaTab('audio')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                     activeMediaTab === 'audio'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      ? 'btn-glow-primary shadow-lg shadow-indigo-500/25'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
                   }`}
                 >
                   <Music className="w-4 h-4" />
@@ -600,10 +902,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 {analyzedMedia.subtitles && analyzedMedia.subtitles.length > 0 && (
                   <button
                     onClick={() => setActiveMediaTab('subtitles')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                       activeMediaTab === 'subtitles'
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        ? 'btn-glow-primary shadow-lg shadow-indigo-500/25'
+                        : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
                     }`}
                   >
                     <Subtitles className="w-4 h-4" />
@@ -620,7 +922,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     <select
                       value={selectedContainer}
                       onChange={(e) => setSelectedContainer(e.target.value)}
-                      className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500"
+                      className="glass-input rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none"
                     >
                       <option value="mp4">MP4 (Recommended)</option>
                       <option value="mkv">MKV (Matroska)</option>
@@ -633,7 +935,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <select
                     value={speedLimit}
                     onChange={(e) => setSpeedLimit(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none"
+                    className="glass-input rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none"
                     title={isAr ? 'تحديد السرعة لهذا التنزيل' : 'Speed limit for this download'}
                   >
                     <option value="unlimited">{isAr ? 'سرعة غير محدودة' : 'Unlimited Speed'}</option>
@@ -648,11 +950,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
             {/* Video Qualities Tab */}
             {activeMediaTab === 'video' && (
-              <div className="py-4 space-y-3">
-                <p className="text-xs font-semibold text-slate-300">
+              <div className="py-5 space-y-3.5">
+                <p className="text-xs font-bold text-slate-200 uppercase tracking-wider">
                   {isAr ? 'اختر الجودة المطلوبة من المصدر:' : 'Select Desired Quality from Source:'}
                 </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {analyzedMedia.formats
                     .filter((f) => !f.isAudioOnly)
                     .map((fmt) => {
@@ -665,20 +967,26 @@ export const HomeView: React.FC<HomeViewProps> = ({
                             setSelectedQualityLabel(fmt.qualityLabel);
                             setActiveProfile('custom');
                           }}
-                          className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between ${
+                          className={`p-3.5 rounded-2xl border cursor-pointer transition-all duration-200 flex flex-col justify-between ${
                             isSelected
-                              ? 'bg-indigo-600/20 border-indigo-500 text-white ring-1 ring-indigo-500'
-                              : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-800/40'
+                              ? 'bg-gradient-to-br from-indigo-500/20 via-purple-500/15 to-transparent border-indigo-500 text-white shadow-lg shadow-indigo-500/20 ring-1 ring-indigo-500'
+                              : 'glass-acrylic text-slate-300 hover:border-white/20 hover:bg-white/[0.04]'
                           }`}
                         >
                           <div className="flex items-center justify-between">
-                            <span className="font-bold text-sm">{fmt.qualityLabel}</span>
-                            {isSelected && <Check className="w-4 h-4 text-indigo-400" />}
+                            <span className="font-extrabold text-sm tracking-tight">{fmt.qualityLabel}</span>
+                            {isSelected ? (
+                              <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-white shadow-sm shadow-indigo-500/50">
+                                <Check className="w-3.5 h-3.5" />
+                              </div>
+                            ) : (
+                              <div className="w-4 h-4 rounded-full border border-slate-600" />
+                            )}
                           </div>
-                          <div className="mt-2 text-[11px] text-slate-400 flex items-center justify-between">
-                            <span>{fmt.resolution || fmt.ext.toUpperCase()}</span>
+                          <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between font-mono">
+                            <span className="px-1.5 py-0.5 rounded bg-white/[0.05]">{fmt.resolution || fmt.ext.toUpperCase()}</span>
                             {fmt.filesize && (
-                              <span>{(fmt.filesize / (1024 * 1024)).toFixed(1)} MB</span>
+                              <span className="font-semibold text-slate-300">{(fmt.filesize / (1024 * 1024)).toFixed(1)} MB</span>
                             )}
                           </div>
                         </div>
@@ -870,32 +1178,172 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
             )}
 
+            {!analyzedMedia.isPlaylist && (
+              <section className="mt-7 rounded-[20px] border border-cyan-400/25 bg-[#091524]/80 overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,.22)]" aria-labelledby="clip-heading">
+                <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 bg-gradient-to-r from-cyan-500/[0.08] to-indigo-500/[0.06]">
+                  <div>
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-9 h-9 rounded-xl bg-cyan-400/10 border border-cyan-400/20 flex items-center justify-center"><Scissors className="w-4 h-4 text-cyan-300" /></span>
+                      <div>
+                    <h3 id="clip-heading" className="text-base font-bold text-white">
+                      {t('downloadSection')}
+                    </h3>
+                    <p className="mt-0.5 text-xs text-slate-400">{t('downloadSectionDesc')}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enableSectionClip}
+                    onClick={() => {
+                      const next = !enableSectionClip;
+                      setEnableSectionClip(next);
+                    }}
+                    className={`focus-ring min-w-36 px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${
+                      enableSectionClip
+                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-indigo-500'
+                    }`}
+                  >
+                    {enableSectionClip ? t('enableSection') : t('fullVideoDefault')}
+                  </button>
+                </div>
+
+                {enableSectionClip && (
+                  <div className="p-5 space-y-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[isAr ? '١. حدد الوقت' : '1. Select range', isAr ? '٢. اختر الدقة' : '2. Choose quality', isAr ? '٣. اختر المجلد' : '3. Destination', isAr ? '٤. ابدأ التنزيل' : '4. Download'].map((step, index) => (
+                        <div key={step} className={`px-3 py-2 rounded-lg text-[11px] font-semibold border ${index === 0 ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200' : 'border-slate-800 bg-slate-900/50 text-slate-400'}`}>{step}</div>
+                      ))}
+                    </div>
+                    {analyzedMedia.duration && (
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <label className="text-xs text-slate-300">
+                          <span className="block mb-1.5">{t('startTime')}</span>
+                          <input
+                            aria-label={t('startTime')}
+                            type="range"
+                            min={0}
+                            max={analyzedMedia.duration}
+                            step="0.1"
+                            value={parseTimestamp(clipStartStr) ?? 0}
+                            onChange={(event) => setClipStartStr(formatDuration(Number(event.target.value)))}
+                            className="w-full accent-indigo-500"
+                          />
+                        </label>
+                        <label className="text-xs text-slate-300">
+                          <span className="block mb-1.5">{t('endTime')}</span>
+                          <input
+                            aria-label={t('endTime')}
+                            type="range"
+                            min={0}
+                            max={analyzedMedia.duration}
+                            step="0.1"
+                            value={parseTimestamp(clipEndStr) ?? analyzedMedia.duration}
+                            onChange={(event) => setClipEndStr(formatDuration(Number(event.target.value)))}
+                            className="w-full accent-cyan-500"
+                          />
+                        </label>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-2xl border border-slate-800 bg-slate-900/35 p-4">
+                      <label className="text-xs text-slate-300">
+                        <span className="block mb-1.5">{t('startTime')}</span>
+                        <input value={clipStartStr} onChange={(e) => setClipStartStr(e.target.value)} placeholder={t('timeRangePlaceholder')} className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-white focus:outline-none focus:border-indigo-500" />
+                      </label>
+                      <label className="text-xs text-slate-300">
+                        <span className="block mb-1.5">{t('endTime')}</span>
+                        <input value={clipEndStr} onChange={(e) => setClipEndStr(e.target.value)} placeholder={t('timeRangePlaceholder')} className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-white focus:outline-none focus:border-indigo-500" />
+                      </label>
+                      <label className="text-xs text-slate-300">
+                        <span className="block mb-1.5">{isAr ? 'اسم المقطع (اختياري)' : 'Clip label (optional)'}</span>
+                        <input value={clipLabel} onChange={(e) => setClipLabel(e.target.value)} className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-white focus:outline-none focus:border-indigo-500" />
+                      </label>
+                    </div>
+
+                    {analyzedMedia.chapters && analyzedMedia.chapters.length > 0 && (
+                      <label className="block text-xs text-slate-300">
+                        <span className="block mb-1.5">{t('selectChapter')}</span>
+                        <select value={selectedChapterIdx} onChange={(e) => handleSelectChapter(Number(e.target.value))} className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-white">
+                          <option value={-1}>{t('customRange')}</option>
+                          {analyzedMedia.chapters.map((chapter, index) => (
+                            <option key={`${chapter.startTime}-${index}`} value={index}>{chapter.title} ({formatDuration(chapter.startTime)}–{formatDuration(chapter.endTime)})</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label={isAr ? 'دقة القص' : 'Cut accuracy'}>
+                      {(['fast', 'accurate'] as const).map((mode) => (
+                        <button key={mode} type="button" role="radio" aria-checked={cutMode === mode} onClick={() => setCutMode(mode)} className={`focus-ring p-4 rounded-xl border text-start transition-all ${cutMode === mode ? 'border-cyan-400/50 bg-cyan-400/10 text-white shadow-[inset_0_0_0_1px_rgba(34,211,238,.12)]' : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:border-slate-700'}`}>
+                          <span className="block text-xs font-bold">{mode === 'fast' ? (isAr ? 'قص سريع' : 'Fast Cut') : (isAr ? 'قص دقيق' : 'Accurate Cut')}</span>
+                          <span className="block mt-1 text-[11px] text-slate-400">{mode === 'fast' ? t('keyframeDisclaimer') : (isAr ? 'حدود أدق بإعادة الترميز عند الحاجة؛ أبطأ ويستهلك المعالج.' : 'More precise boundaries using re-encoding when needed; slower and CPU intensive.')}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const result = await window.electronAPI.selectDirectory();
+                          if (result.success && result.path) setClipDestination(result.path);
+                        }}
+                        className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-900 text-xs text-slate-200 hover:border-indigo-500"
+                      >
+                        <Folder className="w-3.5 h-3.5" />
+                        {isAr ? 'اختيار مجلد الحفظ' : 'Choose destination'}
+                      </button>
+                      <span className="truncate text-[11px] text-slate-400">{clipDestination || (isAr ? 'مجلد التنزيلات الافتراضي' : 'Default Downloads folder')}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="rounded-xl bg-slate-900/60 border border-slate-800 px-3 py-2.5"><span className="block text-[10px] text-slate-500">{isAr ? 'مدة المقطع' : 'Duration'}</span><strong className="text-sm text-white">{clipDurationSec !== null ? formatDuration(clipDurationSec) : '—'}</strong></div>
+                      <div className="rounded-xl bg-slate-900/60 border border-slate-800 px-3 py-2.5"><span className="block text-[10px] text-slate-500">{isAr ? 'الصيغة' : 'Format'}</span><strong className="text-sm text-white">{activeMediaTab === 'audio' ? selectedAudioFormat.toUpperCase() : selectedContainer.toUpperCase()}</strong></div>
+                      <div className="rounded-xl bg-slate-900/60 border border-slate-800 px-3 py-2.5"><span className="block text-[10px] text-slate-500">{isAr ? 'الحجم المتوقع' : 'Estimated size'}</span><strong className="text-sm text-white">{sizeEstimate?.bytes ? `${(sizeEstimate.bytes / 1048576).toFixed(1)} MB` : '—'}</strong></div>
+                      <div className="rounded-xl bg-slate-900/60 border border-slate-800 px-3 py-2.5"><span className="block text-[10px] text-slate-500">{isAr ? 'مساحة القرص' : 'Disk check'}</span><strong className={`text-sm ${diskSpaceResult?.isInsufficient ? 'text-rose-400' : 'text-emerald-400'}`}>{diskSpaceResult?.isInsufficient ? (isAr ? 'غير كافية' : 'Insufficient') : (isAr ? 'جاهز' : 'Ready')}</strong></div>
+                    </div>
+
+                    <div aria-live="polite" className={`text-xs ${clipValidationErr ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {clipValidationErr || (clipDurationSec !== null ? `${t('clipDuration')}: ${formatDuration(clipDurationSec)}` : '')}
+                    </div>
+                    {!ffmpegAvailable && <p className="text-xs text-amber-300">{t('ffmpegRequiredForClips')}</p>}
+                    <p className="text-[11px] text-slate-400">{isAr ? 'سيطلب التطبيق من المصدر تنزيل النطاق المحدد فقط. قد ترسل بعض الخوادم بيانات إضافية حول الإطارات المطلوبة، ولن يتم تنزيل الفيديو الكامل بصمت.' : 'The app requests only the selected section. Some servers may transfer extra data around required keyframes; the full video will never be downloaded silently as a fallback.'}</p>
+                  </div>
+                )}
+              </section>
+            )}
+
             {/* Bottom Actions */}
-            <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between">
-              <div className="text-xs text-slate-400">
-                <span>{isAr ? 'المجلد الوجهة: ' : 'Destination: '}</span>
-                <span className="font-semibold text-slate-300">{isAr ? 'مجلد التنزيلات الافتراضي' : 'Default Downloads Folder'}</span>
+            <div className="mt-8 pt-6 border-t border-white/[0.08] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="text-xs text-slate-400 flex items-center gap-2">
+                <Folder className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span className="text-slate-400">{isAr ? 'المجلد الوجهة: ' : 'Destination: '}</span>
+                <span className="font-semibold text-slate-200 truncate max-w-xs">{enableSectionClip && clipDestination ? clipDestination : (isAr ? 'مجلد التنزيلات الافتراضي' : 'Default Downloads Folder')}</span>
               </div>
 
               {analyzedMedia.isPlaylist ? (
                 <button
                   onClick={handleDownloadPlaylist}
                   disabled={selectedPlaylistIndices.size === 0}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-600/30 disabled:opacity-50 transition-all"
+                  className="btn-glow-primary flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-2xl text-sm font-extrabold text-white shadow-xl shadow-indigo-500/30 disabled:opacity-40 transition-all cursor-pointer"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>{isAr ? `تنزيل الدورة (${selectedPlaylistIndices.size} فيديو)` : `Download Course (${selectedPlaylistIndices.size} Videos)`}</span>
+                  <Download className="w-4 h-4 animate-bounce" />
+                  <span>{isAr ? `تنزيل الدورة كاملة (${selectedPlaylistIndices.size} فيديو)` : `Download Course (${selectedPlaylistIndices.size} Videos)`}</span>
                 </button>
               ) : (
                 <button
                   onClick={() => handleDownloadSingle(activeMediaTab === 'audio')}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-600/30 transition-all"
+                  disabled={enableSectionClip && (!!clipValidationErr || !ffmpegAvailable || diskSpaceResult?.isInsufficient)}
+                  className="btn-glow-primary flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-2xl text-sm font-extrabold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-xl shadow-indigo-500/30 cursor-pointer"
                 >
-                  <Download className="w-4 h-4" />
+                  <Download className="w-4 h-4 animate-pulse" />
                   <span>
                     {activeMediaTab === 'audio'
-                      ? `${isAr ? 'تنزيل الصوت' : 'Download Audio'} (${selectedAudioFormat.toUpperCase()})`
-                      : `${isAr ? 'تنزيل الفيديو' : 'Download Video'} (${selectedQualityLabel})`}
+                      ? `${enableSectionClip ? (isAr ? 'تنزيل المقطع الصوتي' : 'Download Audio Clip') : (isAr ? 'تنزيل الصوت' : 'Download Audio')} (${selectedAudioFormat.toUpperCase()})`
+                      : `${enableSectionClip ? (isAr ? 'تنزيل المقطع' : 'Download Clip') : (isAr ? 'تنزيل الفيديو' : 'Download Video')} (${selectedQualityLabel})`}
                   </span>
                 </button>
               )}

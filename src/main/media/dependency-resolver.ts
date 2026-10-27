@@ -71,7 +71,7 @@ export class DependencyResolver {
           return {
             available: true,
             version: version.trim(),
-            path: testPath === binaryName ? 'system PATH' : path.resolve(testPath),
+            path: testPath === binaryName ? binaryName : path.resolve(testPath),
           };
         }
       } catch (err: any) {
@@ -126,7 +126,7 @@ export class DependencyResolver {
           return {
             available: true,
             version: firstLine,
-            path: testPath === binaryName ? 'system PATH' : path.resolve(testPath),
+            path: testPath === binaryName ? binaryName : path.resolve(testPath),
           };
         }
       } catch (err: any) {

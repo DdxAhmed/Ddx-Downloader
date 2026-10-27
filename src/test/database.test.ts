@@ -44,6 +44,8 @@ describe('DatabaseService SQLite & Schema Migrations', () => {
       eta: '',
       createdAt: new Date().toISOString(),
       isAudioOnly: false,
+      timeRange: { start: 135, end: 220, label: 'Key section' },
+      cutMode: 'accurate',
     };
 
     db.saveJob(job);
@@ -51,6 +53,8 @@ describe('DatabaseService SQLite & Schema Migrations', () => {
     expect(retrieved).not.toBeNull();
     expect(retrieved?.mediaTitle).toBe('Never Gonna Give You Up');
     expect(retrieved?.status).toBe('queued');
+    expect(retrieved?.timeRange).toEqual({ start: 135, end: 220, label: 'Key section' });
+    expect(retrieved?.cutMode).toBe('accurate');
 
     // Update job status
     job.status = 'downloading';

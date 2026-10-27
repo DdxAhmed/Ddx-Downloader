@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-10-27
+
+### Major Design Overhaul & Core Engine Improvements
+- **Complete Visual Overhaul (v2.0)**: World-class cosmic glassmorphism design system (`.glass-acrylic`, `.glass-acrylic-card`) with vibrant radial ambient mesh lighting, glowing call-to-actions (`.btn-glow-primary`), and subtle micro-animations.
+- **Modern Typography**: Integrated Google Fonts (`Cairo` for Arabic RTL elegance and `Plus Jakarta Sans` for clean modern English and numeric typography).
+- **Cinematic Media Inspection**: Ambient thumbnail reflection blur behind analyzed media cards with quality profile pill selectors.
+- **Upgraded Header & Sidebar**: Glass pill header with animated engine beacon, quick folder opening, mini-mode toggle, shortcuts guide, and brand badge with live download count.
+- **Enhanced Downloads Manager**: Multi-color gradient glowing progress bars (`Cyan → Indigo → Purple`), speed and ETA badges, and status diagnostic modals.
+- **FFmpeg Opus-in-MP4 Merge Fix**: Added `--postprocessor-args 'ffmpeg:-strict -2'` to yt-dlp to allow seamless merging of high-quality Opus audio streams into MP4 containers without exit code 1 errors.
+- **Polished Modals & Mini Mode**: Redesigned Keyboard Shortcuts modal, Task Details modal with sanitized technical diagnostics, floating Toast notifications, and a compact Mini Player mode.
+
+---
+
 ## [1.1.0] - 2026-10-25
 
 ### Added & Enhanced

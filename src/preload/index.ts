@@ -6,6 +6,10 @@ import {
   DownloadJob,
   DependencyStatus,
   MediaConversionRequest,
+  SubtitleSearchQuery,
+  MediaFormat,
+  TimeRange,
+  ElectronAPI,
 } from '../types';
 
 const electronAPI = {
@@ -30,6 +34,11 @@ const electronAPI = {
   cancelConversion: () => ipcRenderer.invoke('media:cancelConversion'),
   selectFileForConversion: () => ipcRenderer.invoke('dialog:selectFileForConversion'),
   checkFreeDiskSpace: (dirPath?: string) => ipcRenderer.invoke('storage:checkFreeSpace', dirPath),
+  checkDiskSpaceWithEstimates: (
+    dirPath: string | undefined,
+    estimatedBytes: number,
+    isSeparateStreams?: boolean
+  ) => ipcRenderer.invoke('storage:checkDiskSpaceWithEstimates', dirPath, estimatedBytes, isSeparateStreams),
   cleanTempFiles: () => ipcRenderer.invoke('storage:cleanTemp'),
   toggleMiniMode: (enable: boolean) => ipcRenderer.invoke('app:toggleMiniMode', enable),
   getQueue: () => ipcRenderer.invoke('queue:get'),
@@ -47,6 +56,37 @@ const electronAPI = {
   openFolder: (filePath: string) => ipcRenderer.invoke('shell:openFolder', filePath),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
+
+  // Courses & Playlist Library (Feature 2)
+  saveCourse: (courseData: Parameters<ElectronAPI['saveCourse']>[0]) => ipcRenderer.invoke('courses:save', courseData),
+  getCourses: () => ipcRenderer.invoke('courses:getAll'),
+  getCourse: (courseId: string) => ipcRenderer.invoke('courses:get', courseId),
+  syncCourse: (courseId: string) => ipcRenderer.invoke('courses:sync', courseId),
+  downloadCourseItems: (courseId: string, itemIds: string[], options?: any) =>
+    ipcRenderer.invoke('courses:downloadItems', courseId, itemIds, options),
+  deleteCourse: (courseId: string, deleteFiles = false) =>
+    ipcRenderer.invoke('courses:delete', courseId, deleteFiles),
+
+  // Subtitle Search & Management (Feature 3)
+  searchSubtitles: (query: SubtitleSearchQuery) => ipcRenderer.invoke('subtitles:search', query),
+  importSubtitleFiles: (filePaths?: string[]) => ipcRenderer.invoke('subtitles:importFiles', filePaths),
+  importSubtitleFolder: (folderPath?: string) => ipcRenderer.invoke('subtitles:importFolder', folderPath),
+  playMediaAtTimestamp: (mediaPath: string, timestampSeconds: number) =>
+    ipcRenderer.invoke('subtitles:playAtTimestamp', mediaPath, timestampSeconds),
+  getDetectedMediaPlayers: () => ipcRenderer.invoke('subtitles:getPlayers'),
+
+  // Sizing & Estimates (Feature 4)
+  estimateFormatSize: (format?: MediaFormat, duration?: number, isAudioOnly = false,
+    audioFormat?: MediaFormat, targetContainer?: string, timeRange?: TimeRange) =>
+    ipcRenderer.invoke('media:estimateFormatSize', format, duration, isAudioOnly, audioFormat, targetContainer, timeRange),
+  estimatePlaylistSize: (
+    items: Array<{ id: string; url: string; duration?: number; filesize?: number }>,
+    qualityLabel?: string,
+    formatId?: string,
+    isAudioOnly = false
+  ) => ipcRenderer.invoke('media:estimatePlaylistSize', items, qualityLabel, formatId, isAudioOnly),
+  fetchPlaylistItemSizes: (playlistUrl: string, itemUrls: string[]) =>
+    ipcRenderer.invoke('media:fetchPlaylistItemSizes', playlistUrl, itemUrls),
 
   // Event listeners with unregister callbacks
   onDownloadProgress: (callback: (job: DownloadJob) => void) => {

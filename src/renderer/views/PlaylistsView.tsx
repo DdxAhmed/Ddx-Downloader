@@ -164,17 +164,18 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-8 animate-fadeIn">
+    <div className="px-5 py-6 lg:px-8 lg:py-7 max-w-[1440px] mx-auto space-y-6 animate-fadeIn">
       {/* Header Banner */}
-      <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-2">
+      <div className="glass-acrylic p-7 rounded-[26px] border border-white/[0.08] shadow-xl space-y-2.5 relative overflow-hidden">
+        <div className="absolute -top-20 -right-20 w-72 h-72 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold uppercase tracking-wider">
           <FolderTree className="w-4 h-4" />
           <span>{isAr ? 'منظم ومنزل الدورات التعليمية' : 'Curriculum & Course Downloader'}</span>
         </div>
-        <h2 className="text-2xl font-bold text-white">
+        <h2 className="text-2xl lg:text-[28px] font-black text-white tracking-tight">
           {isAr ? 'تنزيل دورات وقوائم تشغيل تعليمية كاملة' : 'Download Entire Educational Courses'}
         </h2>
-        <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
+        <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
           {isAr
             ? 'احفظ ترتيب الدروس تلقائياً بترقيم منظم (01 - مقدمة.mp4)، وحدد الدقة المطلوبة لكل المقاطع بضغطة واحدة مع تنظيمها في مجلدات منفصلة.'
             : 'Preserve lesson order automatically, customize video resolutions, and download structured playlists organized directly into dedicated course folders.'}
@@ -182,7 +183,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
       </div>
 
       {/* URL Input */}
-      <div className="glass-panel p-3 rounded-2xl shadow-xl border border-slate-700/60 focus-within:border-indigo-500">
+      <div className="glass-acrylic p-2 rounded-2xl border border-white/[0.08] shadow-xl transition-all duration-300 focus-within:border-indigo-500/80 focus-within:shadow-[0_0_30px_rgba(99,102,241,0.22)]">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -190,7 +191,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
           }}
           className="flex items-center gap-2"
         >
-          <div className="pl-3 text-slate-400">
+          <div className="pl-3.5 text-slate-400">
             <Search className="w-5 h-5 text-indigo-400" />
           </div>
           <input
@@ -202,16 +203,16 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
                 ? 'الصق رابط قائمة التشغيل أو الدورة (e.g. https://www.youtube.com/playlist?list=...)'
                 : 'Paste YouTube Playlist / Course URL (e.g. https://www.youtube.com/playlist?list=...)'
             }
-            className="flex-1 bg-transparent border-0 text-white placeholder-slate-500 text-sm focus:outline-none px-2 py-3"
+            className="flex-1 bg-transparent border-0 text-white placeholder-slate-400 text-sm focus:outline-none px-2 py-3.5"
           />
           <button
             type="submit"
             disabled={isAnalyzing || !url.trim()}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 disabled:opacity-50 transition-all"
+            className="btn-glow-primary flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white disabled:opacity-40 transition-all cursor-pointer"
           >
             {isAnalyzing ? (
               <>
-                <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 <span>{isAr ? 'جاري المسح...' : 'Scanning...'}</span>
               </>
             ) : (

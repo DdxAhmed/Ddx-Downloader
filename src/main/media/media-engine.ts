@@ -9,6 +9,7 @@ import {
   MediaInfo,
   MediaFormat,
   SubtitleTrack,
+  MediaChapter,
   PlaylistItem,
   DownloadJob,
   CreateDownloadRequest,
@@ -20,11 +21,66 @@ export class MediaEngine {
   private resolver: DependencyResolver;
   private providerRegistry: ProviderRegistry;
   private activeProcesses: Map<string, ChildProcess> = new Map();
+  private pendingDownloads = new Map<string, object>();
   private activeConversionProcess?: ChildProcess;
+  private children = new Set<ChildProcess>();
+  private shuttingDown = false;
+  private pendingConversion = false;
+
+  private trackChild(child: ChildProcess): void {
+    this.children.add(child);
+    child.once('close', () => this.children.delete(child));
+    child.once('error', () => { if (!child.pid) this.children.delete(child); });
+  }
+
+  public hasActiveWork(): boolean {
+    return this.children.size > 0 || this.pendingDownloads.size > 0 || this.pendingConversion;
+  }
+
+  public recoverFromShutdown(): void { this.shuttingDown = false; }
+
+  public async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    this.pendingDownloads.clear();
+    this.activeProcesses.clear();
+    const results = await Promise.allSettled([...this.children].map((child) => new Promise<void>((resolve, reject) => {
+      if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
+      const timer = setTimeout(() => finish(new Error('A media process did not stop; update postponed.')), 10000);
+      let childClosed = false;
+      let treeStopped = process.platform !== 'win32' || !child.pid;
+      const onClose = () => { childClosed = true; if (treeStopped) finish(); };
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        child.removeListener('close', onClose);
+        error ? reject(error) : resolve();
+      };
+      child.once('close', onClose);
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          const killer = spawn(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'),
+            ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
+          killer.once('error', finish);
+          killer.once('close', (code) => {
+            if (code !== 0) { finish(new Error('Could not confirm that the media process tree stopped; update postponed.')); return; }
+            treeStopped = true;
+            if (childClosed) finish();
+          });
+        } else if (!child.kill('SIGTERM')) finish(new Error('Could not stop a media process; update postponed.'));
+      } catch (error) { finish(error as Error); }
+    })));
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+  }
+  private playlistItemSizeCache = new Map<string, { filesize?: number; filesizeApprox?: number; tbr?: number }>();
+  private onSubtitlesDownloadedCallback?: (subtitlePath: string, job: DownloadJob) => void;
 
   constructor(resolver: DependencyResolver) {
     this.resolver = resolver;
     this.providerRegistry = new ProviderRegistry();
+  }
+
+  public setOnSubtitlesDownloaded(cb: (subtitlePath: string, job: DownloadJob) => void): void {
+    this.onSubtitlesDownloadedCallback = cb;
   }
 
   public getProviderRegistry(): ProviderRegistry {
@@ -270,6 +326,15 @@ export class MediaEngine {
       }
     }
 
+    // Parse chapters if available
+    const chapters: MediaChapter[] = Array.isArray(data.chapters)
+      ? data.chapters.map((c: any) => ({
+          title: c.title || 'Chapter',
+          startTime: typeof c.start_time === 'number' ? c.start_time : 0,
+          endTime: typeof c.end_time === 'number' ? c.end_time : 0,
+        }))
+      : undefined;
+
     return {
       id: data.id || 'video',
       url: cleanUrl,
@@ -283,6 +348,7 @@ export class MediaEngine {
       isPlaylist: false,
       formats,
       subtitles,
+      chapters,
     };
   }
 
@@ -295,8 +361,21 @@ export class MediaEngine {
     onComplete: (completedJob: DownloadJob) => void,
     onError: (failedJob: DownloadJob, err: Error) => void
   ): Promise<void> {
-    const ytDlpPath = await this.resolver.getYtDlpPath();
-    const ffmpegPath = await this.resolver.getFfmpegPath();
+    if (this.shuttingDown) throw new Error('Application is preparing to exit.');
+    const attempt = {};
+    this.pendingDownloads.set(job.id, attempt);
+    let ytDlpPath: string | null;
+    let ffmpegPath: string | null;
+    try {
+      ytDlpPath = await this.resolver.getYtDlpPath();
+      if (this.pendingDownloads.get(job.id) !== attempt) return;
+      ffmpegPath = await this.resolver.getFfmpegPath();
+      if (this.pendingDownloads.get(job.id) !== attempt) return;
+    } finally {
+      if (this.pendingDownloads.get(job.id) === attempt) {
+        this.pendingDownloads.delete(job.id);
+      }
+    }
 
     if (!ytDlpPath) {
       const err = new Error('yt-dlp is missing. Cannot start download.');
@@ -321,6 +400,7 @@ export class MediaEngine {
     if (ffmpegPath) {
       const ffmpegDir = path.dirname(ffmpegPath);
       args.push('--ffmpeg-location', ffmpegDir);
+      args.push('--postprocessor-args', 'ffmpeg:-strict -2');
     }
 
     // Apply speed limit if configured (e.g. '5M', '1M')
@@ -334,18 +414,24 @@ export class MediaEngine {
       args.push('--audio-format', audioFormat);
       args.push('-f', 'bestaudio/best');
     } else {
+      const container = job.targetContainer || 'mp4';
       if (job.selectedFormat && job.selectedFormat !== 'bestvideo+bestaudio/best') {
         if (job.selectedFormat.includes('+') || job.selectedFormat.includes('/')) {
           args.push('-f', job.selectedFormat);
         } else {
-          // If specific format ID, pair with best audio and merge
-          args.push('-f', `${job.selectedFormat}+bestaudio/best`);
+          // MP4 cannot reliably contain Opus with older/system FFmpeg builds.
+          // Prefer AAC/M4A and then a combined MP4 instead of selecting Opus
+          // and failing during the final merge.
+          const audioSelector = container === 'mp4'
+            ? `${job.selectedFormat}+bestaudio[ext=m4a]/${job.selectedFormat}+bestaudio[acodec^=mp4a]/best[ext=mp4]`
+            : `${job.selectedFormat}+bestaudio/best`;
+          args.push('-f', audioSelector);
         }
       } else {
-        args.push('-f', 'bestvideo+bestaudio/best');
+        args.push('-f', container === 'mp4'
+          ? 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[acodec^=mp4a]/best[ext=mp4]'
+          : 'bestvideo+bestaudio/best');
       }
-
-      const container = job.targetContainer || 'mp4';
       args.push('--merge-output-format', container);
     }
 
@@ -354,6 +440,25 @@ export class MediaEngine {
       args.push('--write-subs', '--sub-langs', job.selectedSubtitles.join(','));
       if (job.embedSubtitles) {
         args.push('--embed-subs');
+      }
+    }
+
+    // Time range / chapter clipping
+    if (job.timeRange) {
+      if (!ffmpegPath) {
+        const err = new Error(
+          'FFmpeg is required to download a selected time range or chapter. Please configure FFmpeg in Settings.'
+        );
+        job.status = 'failed';
+        job.errorMessage = err.message;
+        job.errorDetails = ErrorClassifier.classify(err.message);
+        onError(job, err);
+        return;
+      }
+
+      args.push('--download-sections', `*${job.timeRange.start}-${job.timeRange.end}`);
+      if (job.cutMode === 'accurate') {
+        args.push('--force-keyframes-at-cuts');
       }
     }
 
@@ -370,6 +475,7 @@ export class MediaEngine {
     });
 
     this.activeProcesses.set(job.id, child);
+    this.trackChild(child);
 
     let stderrBuffer = '';
 
@@ -431,9 +537,24 @@ export class MediaEngine {
     });
 
     child.on('close', (code) => {
+      if (this.activeProcesses.get(job.id) !== child) return;
       this.activeProcesses.delete(job.id);
 
       if (code === 0) {
+        if (job.timeRange) {
+          try {
+            if (!fs.existsSync(job.outputPath) || fs.statSync(job.outputPath).size <= 0) {
+              throw new Error('The clip process finished without producing a valid output file.');
+            }
+          } catch (verificationError: any) {
+            const classified = ErrorClassifier.classify(verificationError.message);
+            job.status = 'failed';
+            job.errorMessage = classified.explanationEn;
+            job.errorDetails = classified;
+            onError(job, verificationError);
+            return;
+          }
+        }
         job.status = 'completed';
         job.progress = 100;
         job.eta = '00:00';
@@ -449,6 +570,22 @@ export class MediaEngine {
           }
         } catch {}
 
+        // Notify if subtitles were downloaded alongside
+        if (this.onSubtitlesDownloadedCallback && job.selectedSubtitles && job.selectedSubtitles.length > 0) {
+          try {
+            const outDir = path.dirname(job.outputPath);
+            const baseWithoutExt = path.basename(job.outputPath, path.extname(job.outputPath));
+            if (fs.existsSync(outDir)) {
+              const files = fs.readdirSync(outDir);
+              for (const f of files) {
+                if (f.startsWith(baseWithoutExt) && (f.endsWith('.vtt') || f.endsWith('.srt'))) {
+                  this.onSubtitlesDownloadedCallback(path.join(outDir, f), job);
+                }
+              }
+            }
+          } catch {}
+        }
+
         onComplete(job);
       } else if (job.status === 'cancelled') {
         // Was deliberately cancelled by user
@@ -463,6 +600,7 @@ export class MediaEngine {
     });
 
     child.on('error', (err) => {
+      if (this.activeProcesses.get(job.id) !== child) return;
       this.activeProcesses.delete(job.id);
       const classified = ErrorClassifier.classify(err.message);
       job.status = 'failed';
@@ -476,8 +614,9 @@ export class MediaEngine {
    * Cancels an active download process
    */
   public cancelDownload(jobId: string): boolean {
+    const cancelledPending = this.pendingDownloads.delete(jobId);
     const child = this.activeProcesses.get(jobId);
-    if (!child) return false;
+    if (!child) return cancelledPending;
 
     try {
       if (process.platform === 'win32' && child.pid) {
@@ -496,9 +635,11 @@ export class MediaEngine {
 
   private executeProcess(executable: string, args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
+      if (this.shuttingDown) { reject(new Error('Application is preparing to exit.')); return; }
       const child = spawn(executable, args, {
         windowsHide: true,
       });
+      this.trackChild(child);
 
       let stdout = '';
       let stderr = '';
@@ -602,7 +743,14 @@ export class MediaEngine {
     onComplete: (outputPath: string) => void,
     onError: (err: Error) => void
   ): Promise<void> {
-    const ffmpegPath = await this.resolver.getFfmpegPath();
+    if (this.shuttingDown || this.pendingConversion || this.activeConversionProcess) {
+      throw new Error('Conversion is unavailable while another conversion or shutdown is in progress.');
+    }
+    this.pendingConversion = true;
+    let ffmpegPath: string | null;
+    try { ffmpegPath = await this.resolver.getFfmpegPath(); }
+    finally { this.pendingConversion = false; }
+    if (this.shuttingDown) return;
     if (!ffmpegPath) {
       onError(new Error('FFmpeg is required for media conversion. Please configure its path in Settings.'));
       return;
@@ -652,6 +800,7 @@ export class MediaEngine {
 
     const child = spawn(ffmpegPath, args, { windowsHide: true });
     this.activeConversionProcess = child;
+    this.trackChild(child);
 
     let stderrBuffer = '';
 
@@ -704,5 +853,57 @@ export class MediaEngine {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Fetches metadata (filesize, filesize_approx, tbr) for playlist items using bounded concurrency.
+   * Results are cached by item URL to prevent repeated network requests.
+   */
+  public async fetchPlaylistItemSizes(
+    itemUrls: string[],
+    concurrency = 3
+  ): Promise<{ [url: string]: { filesize?: number; filesizeApprox?: number; tbr?: number } }> {
+    const ytDlpPath = await this.resolver.getYtDlpPath();
+    const result: { [url: string]: { filesize?: number; filesizeApprox?: number; tbr?: number } } = {};
+    if (!ytDlpPath || !itemUrls || itemUrls.length === 0) return result;
+
+    const queue = [...itemUrls];
+    const runWorker = async () => {
+      while (queue.length > 0) {
+        const itemUrl = queue.shift();
+        if (!itemUrl) break;
+
+        if (this.playlistItemSizeCache.has(itemUrl)) {
+          result[itemUrl] = this.playlistItemSizeCache.get(itemUrl)!;
+          continue;
+        }
+
+        try {
+          const stdout = await this.executeProcess(ytDlpPath, [
+            '--dump-single-json',
+            '--no-warnings',
+            '--no-call-home',
+            '--skip-download',
+            itemUrl,
+          ]);
+          const data = JSON.parse(stdout);
+          const info = {
+            filesize: typeof data.filesize === 'number' ? data.filesize : undefined,
+            filesizeApprox: typeof data.filesize_approx === 'number' ? data.filesize_approx : undefined,
+            tbr: typeof data.tbr === 'number' ? data.tbr : undefined,
+          };
+          this.playlistItemSizeCache.set(itemUrl, info);
+          result[itemUrl] = info;
+        } catch {
+          // If individual query fails, continue without stalling the batch
+        }
+      }
+    };
+
+    const workerCount = Math.min(concurrency, itemUrls.length);
+    const workers = Array.from({ length: workerCount }, () => runWorker());
+    await Promise.all(workers);
+
+    return result;
   }
 }

@@ -10,6 +10,8 @@ export interface MediaFormat {
   vcodec?: string;
   acodec?: string;
   filesize?: number;
+  filesizeApprox?: number;
+  filesize_approx?: number;
   tbr?: number;
   qualityLabel: string;
   isVideoOnly: boolean;
@@ -50,6 +52,7 @@ export interface MediaInfo {
   playlistItems?: PlaylistItem[];
   formats: MediaFormat[];
   subtitles: SubtitleTrack[];
+  chapters?: MediaChapter[];
 }
 
 export type JobStatus =
@@ -128,6 +131,12 @@ export interface DownloadJob {
   playlistIndex?: number;
   selectedSubtitles?: string[];
   embedSubtitles?: boolean;
+  timeRange?: TimeRange;
+  cutMode?: CutMode;
+  estimatedSizeBytes?: number;
+  sizeEstimationType?: SizeEstimationType;
+  courseId?: string;
+  courseItemId?: string;
 }
 
 export interface DownloadHistoryEntry {
@@ -143,6 +152,7 @@ export interface DownloadHistoryEntry {
   thumbnailUrl?: string;
   completedAt: string;
   fileExists?: boolean; // dynamic check for library missing file detection
+  timeRange?: TimeRange;
 }
 
 export interface AppSettings {
@@ -163,6 +173,7 @@ export interface AppSettings {
   notificationsEnabled?: boolean;
   duplicateConflictPolicy?: 'prompt' | 'skip' | 'overwrite' | 'rename';
   clipboardMonitoring?: boolean;
+  customMediaPlayerPath?: string;
 }
 
 export interface DependencyStatusItem {
@@ -188,6 +199,7 @@ export interface CreateDownloadRequest {
   isAudioOnly: boolean;
   container: string;
   customSubfolder?: string;
+  destinationDirectory?: string;
   playlistTitle?: string;
   playlistIndex?: number;
   selectedSubtitles?: string[];
@@ -195,6 +207,12 @@ export interface CreateDownloadRequest {
   speedLimit?: string;
   downloadSubtitlesOnly?: boolean;
   subtitleFormat?: 'srt' | 'vtt';
+  timeRange?: TimeRange;
+  cutMode?: CutMode;
+  estimatedSizeBytes?: number;
+  sizeEstimationType?: SizeEstimationType;
+  courseId?: string;
+  courseItemId?: string;
 }
 
 export interface PlaylistBatchDownloadRequest {
@@ -250,6 +268,7 @@ export type UpdateStatus =
   | 'not-available'
   | 'downloading'
   | 'downloaded'
+  | 'installing'
   | 'error';
 
 export interface UpdateInfo {
@@ -267,6 +286,7 @@ export interface UpdateProgress {
 }
 
 export interface UpdateState {
+  installOnExit?: boolean;
   status: UpdateStatus;
   currentVersion: string;
   updateInfo?: UpdateInfo | null;
@@ -274,6 +294,169 @@ export interface UpdateState {
   error?: string | null;
   lastChecked?: string | null;
   isManualCheck?: boolean;
+}
+
+export interface MediaChapter {
+  title: string;
+  startTime: number;
+  endTime: number;
+}
+
+export interface TimeRange {
+  start: number;
+  end: number;
+  label?: string;
+}
+
+export type CutMode = 'fast' | 'accurate';
+
+export type SizeEstimationType = 'reported' | 'estimated' | 'unknown';
+
+export interface SizeEstimate {
+  bytes: number;
+  type: SizeEstimationType;
+  details?: string;
+}
+
+export interface PlaylistSizeEstimate {
+  totalBytes: number;
+  knownCount: number;
+  unknownCount: number;
+  totalCount: number;
+  isComplete: boolean;
+}
+
+export interface DiskSpaceInfo {
+  available: boolean;
+  freeBytes?: number;
+  totalBytes?: number;
+  path?: string;
+  error?: string;
+}
+
+export interface DiskSpaceCheckResult {
+  diskSpace: DiskSpaceInfo;
+  estimatedRequiredBytes: number;
+  estimatedPeakBytes: number;
+  pendingQueueBytes: number;
+  projectedRemainingBytes: number;
+  isLowSpace: boolean;
+  isInsufficient: boolean;
+}
+
+export type CourseItemStatus =
+  | 'new'
+  | 'queued'
+  | 'downloading'
+  | 'downloaded'
+  | 'missing_local'
+  | 'failed'
+  | 'removed_from_source';
+
+export interface CourseItem {
+  id: string;
+  courseId: string;
+  sourceMediaId: string;
+  title: string;
+  url: string;
+  index: number;
+  duration?: number;
+  thumbnailUrl?: string;
+  jobId?: string;
+  localFilePath?: string;
+  status: CourseItemStatus;
+  updatedAt: string;
+}
+
+export interface SavedCourse {
+  id: string;
+  sourceUrl: string;
+  platform: string;
+  providerPlaylistId?: string;
+  title: string;
+  thumbnailUrl?: string;
+  destinationFolder: string;
+  preferredQuality: string;
+  preferredContainer: string;
+  isAudioOnly: boolean;
+  selectedSubtitles?: string[];
+  itemCount: number;
+  lastSyncedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CourseWithItems extends SavedCourse {
+  items: CourseItem[];
+  stats: {
+    total: number;
+    downloaded: number;
+    downloading: number;
+    missingLocal: number;
+    failed: number;
+    newItems: number;
+    progressPercent: number;
+  };
+}
+
+export interface CourseSyncResult {
+  courseId: string;
+  addedCount: number;
+  missingLocalCount: number;
+  removedCount: number;
+  unchangedCount: number;
+  totalCount: number;
+  items: CourseItem[];
+}
+
+export interface SubtitleCue {
+  id: string;
+  fileId: string;
+  cueIndex: number;
+  startTime: number;
+  endTime: number;
+  text: string;
+  normalizedText: string;
+}
+
+export interface SubtitleSearchResult {
+  id: string;
+  fileId: string;
+  cueIndex: number;
+  startTime: number;
+  endTime: number;
+  timestampFormatted: string;
+  text: string;
+  matchedSnippet: string;
+  mediaTitle: string;
+  subtitlePath: string;
+  language: string;
+  format: 'srt' | 'vtt';
+  associatedMediaPath?: string;
+  mediaExists: boolean;
+  canDirectSeek: boolean;
+  supportedPlayerName?: string;
+}
+
+export interface SubtitleSearchQuery {
+  query: string;
+  language?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface SubtitleSearchResponse {
+  results: SubtitleSearchResult[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface SupportedPlayerInfo {
+  name: 'vlc' | 'mpv' | 'mpc-hc';
+  displayName: string;
+  executablePath: string;
 }
 
 export interface ElectronAPI {
@@ -300,12 +483,69 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<{ success: boolean }>;
   getAppInfo: () => Promise<AppInfo>;
   checkDuplicate: (url: string) => Promise<DuplicateCheckResult>;
-  checkFreeDiskSpace?: (dirPath?: string) => Promise<{ freeBytes: number; totalBytes: number }>;
+  checkFreeDiskSpace?: (dirPath?: string) => Promise<DiskSpaceInfo>;
+  checkDiskSpaceWithEstimates?: (
+    dirPath: string | undefined,
+    estimatedBytes: number,
+    isSeparateStreams?: boolean
+  ) => Promise<DiskSpaceCheckResult>;
   cleanTempFiles?: () => Promise<{ success: boolean; cleanedCount: number; freedBytes: number; error?: string }>;
   convertMedia?: (req: MediaConversionRequest) => Promise<{ success: boolean; error?: string }>;
   cancelConversion?: () => Promise<{ success: boolean }>;
   toggleMiniMode?: (enable: boolean) => Promise<{ success: boolean }>;
   downloadStandaloneSubtitle?: (url: string, lang: string, format: 'srt' | 'vtt', outDir?: string, filename?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  // Courses / Playlists
+  saveCourse: (course: {
+    sourceUrl: string;
+    platform: string;
+    providerPlaylistId?: string;
+    title: string;
+    thumbnailUrl?: string;
+    destinationFolder: string;
+    preferredQuality: string;
+    preferredContainer: string;
+    isAudioOnly: boolean;
+    selectedSubtitles?: string[];
+    items: Array<{
+      sourceMediaId: string;
+      title: string;
+      url: string;
+      index: number;
+      duration?: number;
+      thumbnailUrl?: string;
+    }>;
+  }) => Promise<{ success: boolean; courseId?: string; error?: string }>;
+  getCourses: () => Promise<CourseWithItems[]>;
+  getCourse: (courseId: string) => Promise<CourseWithItems | null>;
+  syncCourse: (courseId: string) => Promise<{ success: boolean; result?: CourseSyncResult; error?: string }>;
+  downloadCourseItems: (
+    courseId: string,
+    itemIds: string[],
+    options?: { qualityLabel?: string; formatId?: string; isAudioOnly?: boolean; container?: string; speedLimit?: string }
+  ) => Promise<{ success: boolean; jobIds?: string[]; error?: string }>;
+  deleteCourse: (courseId: string, deleteFiles?: boolean) => Promise<{ success: boolean; error?: string }>;
+
+  // Subtitle Search & Management
+  searchSubtitles: (query: SubtitleSearchQuery) => Promise<SubtitleSearchResponse>;
+  importSubtitleFiles: (filePaths?: string[]) => Promise<{ success: boolean; indexedCount: number; error?: string }>;
+  importSubtitleFolder: (folderPath?: string) => Promise<{ success: boolean; indexedCount: number; error?: string }>;
+  playMediaAtTimestamp: (mediaPath: string, timestampSeconds: number) => Promise<{ success: boolean; launchedPlayer?: string; copiedTimestamp?: string; error?: string }>;
+  getDetectedMediaPlayers: () => Promise<SupportedPlayerInfo[]>;
+
+  // Sizing & Estimates
+  estimateFormatSize: (format?: MediaFormat, duration?: number, isAudioOnly?: boolean,
+    audioFormat?: MediaFormat, targetContainer?: string, timeRange?: TimeRange) => Promise<SizeEstimate>;
+  estimatePlaylistSize: (
+    items: Array<{ id: string; url: string; duration?: number }>,
+    qualityLabel?: string,
+    formatId?: string,
+    isAudioOnly?: boolean
+  ) => Promise<PlaylistSizeEstimate>;
+  fetchPlaylistItemSizes: (
+    playlistUrl: string,
+    itemUrls: string[]
+  ) => Promise<{ [url: string]: { filesize?: number; filesizeApprox?: number; tbr?: number } }>;
+
   onDownloadProgress: (callback: (job: DownloadJob) => void) => () => void;
   onQueueUpdated: (callback: (queue: DownloadJob[]) => void) => () => void;
   onDependencyStatusChanged: (callback: (status: DependencyStatus) => void) => () => void;
@@ -313,7 +553,7 @@ export interface ElectronAPI {
   // Updater
   checkForUpdates: (isManual?: boolean) => Promise<{ success: boolean; error?: string }>;
   downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
-  installUpdate: () => Promise<{ success: boolean; error?: string }>;
+  installUpdate: () => Promise<{ success: boolean; error?: string; postponed?: boolean }>;
   getUpdateState: () => Promise<UpdateState>;
   onUpdateStateChanged: (callback: (state: UpdateState) => void) => () => void;
 }

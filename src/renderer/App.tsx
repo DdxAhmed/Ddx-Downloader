@@ -48,7 +48,7 @@ export const App: React.FC = () => {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [updateState, setUpdateState] = useState<UpdateState>({
     status: 'idle',
-    currentVersion: '1.0.0',
+    currentVersion: '2.0.0',
     updateInfo: null,
     progress: null,
     error: null,
@@ -116,7 +116,7 @@ export const App: React.FC = () => {
         if (initialDeps) setDependencies(initialDeps);
         if (initialUpdate) {
           setUpdateState(initialUpdate);
-          if (initialUpdate.status === 'available') {
+          if (['available', 'downloaded', 'error'].includes(initialUpdate.status)) {
             setShowUpdateModal(true);
           }
         }
@@ -168,7 +168,7 @@ export const App: React.FC = () => {
 
       const unsubUpdater = window.electronAPI.onUpdateStateChanged((state) => {
         setUpdateState(state);
-        if (state.status === 'available') {
+        if (state.status === 'available' && state.isManualCheck) {
           setShowUpdateModal(true);
         } else if (state.status === 'not-available' && state.isManualCheck) {
           addToast(
@@ -185,7 +185,8 @@ export const App: React.FC = () => {
               : 'Update downloaded! Ready to restart and install.',
             'success'
           );
-        } else if (state.status === 'error' && state.isManualCheck) {
+        } else if (state.status === 'error') {
+          setShowUpdateModal(true);
           addToast(state.error || 'Failed to check for updates.', 'error');
         }
       });
@@ -431,7 +432,8 @@ export const App: React.FC = () => {
 
   const handleInstallUpdate = async () => {
     if (!window.electronAPI) return;
-    await window.electronAPI.installUpdate();
+    const result = await window.electronAPI.installUpdate();
+    if (result.error) addToast(result.error, 'error');
   };
 
   // Keyboard shortcuts listener
@@ -558,7 +560,7 @@ export const App: React.FC = () => {
   const headerInfo = getHeaderInfo();
 
   return (
-    <div className={`flex h-screen w-screen overflow-hidden ${theme === 'light' ? 'light app-light' : 'dark app-dark'} bg-[#0b0f19] text-slate-100`}>
+    <div className={`app-shell flex h-screen w-screen overflow-hidden ${theme === 'light' ? 'light app-light' : 'dark app-dark'} text-slate-100`}>
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
@@ -568,7 +570,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="relative flex-1 flex flex-col h-screen overflow-hidden min-w-0">
         <Header
           title={headerInfo.title}
           subtitle={headerInfo.subtitle}
@@ -583,7 +585,7 @@ export const App: React.FC = () => {
           onOpenShortcuts={() => setShowShortcutsModal(true)}
         />
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="app-content flex-1 overflow-y-auto">
           {activeTab === 'home' && (
             <HomeView
               onStartDownload={handleStartDownload}
@@ -675,6 +677,8 @@ export const App: React.FC = () => {
       {/* Update Modal */}
       {showUpdateModal && (
         <UpdateModal
+          lang={lang}
+          onCheck={handleCheckUpdates}
           updateState={updateState}
           onDownload={handleDownloadUpdate}
           onInstall={handleInstallUpdate}

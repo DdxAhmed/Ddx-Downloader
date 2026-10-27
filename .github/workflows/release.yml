@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-windows:
     name: Build & Publish Windows Distributable
@@ -49,31 +53,43 @@ jobs:
 
       - name: Build and Package Windows NSIS Distributable
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:nsis
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: npm run dist:nsis -- --publish never
 
-      - name: Verify Single Setup Executable
-        shell: pwsh
-        run: |
-          $setupFiles = Get-ChildItem -Path "release" -Filter "Ddx-Downloader-Setup-*.exe"
-          if ($setupFiles.Count -ne 1) {
-            Write-Error "Validation failed: Expected exactly 1 setup executable matching 'Ddx-Downloader-Setup-*.exe', but found $($setupFiles.Count)."
-            exit 1
-          }
-          Write-Host "Success: Verified single setup installer -> $($setupFiles[0].Name) ($([math]::Round($setupFiles[0].Length / 1MB, 2)) MB)"
+      - name: Validate update metadata and generated artifacts
+        run: npm run validate:release
 
-      - name: Upload Setup Executable Artifact
+      - name: Archive complete update artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Ddx-Downloader-Setup
-          path: release/Ddx-Downloader-Setup-*.exe
+          path: |
+            release/Ddx-Downloader-Setup-*.exe
+            release/latest.yml
+            release/*.blockmap
           if-no-files-found: error
 
-      - name: Publish Single Setup to GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Stage immutable release with all generated update artifacts
         if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          files: release/Ddx-Downloader-Setup-*.exe
-          draft: false
-          prerelease: false
-          generate_release_notes: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$env:GITHUB_REF_NAME" --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release already exists. Do not replace published artifacts; use a new version/tag." }
+          $artifacts = Get-ChildItem -Path release -File | Where-Object { $_.Name -like '*.exe' -or $_.Name -like '*.blockmap' -or $_.Name -eq 'latest.yml' } | ForEach-Object { $_.FullName }
+          gh release create "$env:GITHUB_REF_NAME" @artifacts --draft --verify-tag --generate-notes --title "$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to stage release" }
+
+      - name: Verify uploaded URLs, sizes, metadata and hashes before publishing
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run validate:release -- release --github
+
+      - name: Publish verified release (retain all older release assets)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$env:GITHUB_REF_NAME" --draft=false --latest

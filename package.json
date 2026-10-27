@@ -1,6 +1,6 @@
 {
   "name": "ddx-downloader",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Production-quality open-source desktop application for downloading YouTube videos, educational courses, playlists, and online media.",
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "validate:release": "node scripts/validate-release.mjs",
     "dist": "npm run build && electron-builder --win nsis --x64",
     "dist:nsis": "npm run build && electron-builder --win nsis --x64"
   },
@@ -61,6 +62,8 @@
       ]
     },
     "nsis": {
+      "differentialPackage": "store-asar",
+      "deleteAppDataOnUninstall": false,
       "artifactName": "Ddx-Downloader-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
