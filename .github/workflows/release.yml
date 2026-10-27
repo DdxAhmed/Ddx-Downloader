@@ -76,10 +76,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "$env:GITHUB_REF_NAME" --json isDraft 2>$null
-          if ($LASTEXITCODE -eq 0) { throw "Release already exists. Do not replace published artifacts; use a new version/tag." }
+          $existingJson = gh release view "$env:GITHUB_REF_NAME" --json isDraft 2>$null
+          $existing = $null
+          if ($LASTEXITCODE -eq 0 -and $existingJson) {
+            $existing = $existingJson | ConvertFrom-Json
+            if (-not $existing.isDraft) {
+              throw "Published release already exists. Do not replace published artifacts; use a new version/tag."
+            }
+          }
           $artifacts = Get-ChildItem -Path release -File | Where-Object { $_.Name -like '*.exe' -or $_.Name -like '*.blockmap' -or $_.Name -eq 'latest.yml' } | ForEach-Object { $_.FullName }
-          gh release create "$env:GITHUB_REF_NAME" @artifacts --draft --verify-tag --generate-notes --title "$env:GITHUB_REF_NAME"
+          if ($existing -and $existing.isDraft) {
+            gh release upload "$env:GITHUB_REF_NAME" @artifacts --clobber
+          } else {
+            gh release create "$env:GITHUB_REF_NAME" @artifacts --draft --verify-tag --generate-notes --title "$env:GITHUB_REF_NAME"
+          }
           if ($LASTEXITCODE -ne 0) { throw "Failed to stage release" }
 
       - name: Verify uploaded URLs, sizes, metadata and hashes before publishing

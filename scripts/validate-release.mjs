@@ -44,16 +44,28 @@ export async function validateRelease(directory, version, tag) {
 export async function validateUploadedAssets(directory, names, repository, tag, token) {
   ensure(/^[\w.-]+\/[\w.-]+$/.test(repository), 'Invalid GitHub repository');
   const headers = { Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' };
-  const response = await fetch(`https://api.github.com/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`, { headers });
-  ensure(response.ok, `Cannot read release metadata: HTTP ${response.status}`);
-  const release = await response.json();
+  let response = await fetch(`https://api.github.com/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`, { headers });
+  let release;
+  if (response.ok) {
+    release = await response.json();
+  } else if (response.status === 404) {
+    // Draft releases are not returned by /releases/tags/:tag. Fall back to listing releases.
+    const listRes = await fetch(`https://api.github.com/repos/${repository}/releases`, { headers });
+    ensure(listRes.ok, `Cannot read release metadata: HTTP ${listRes.status}`);
+    const releases = await listRes.json();
+    release = releases.find((r) => r.tag_name === tag);
+    ensure(release, `Release with tag ${tag} not found`);
+  } else {
+    ensure(false, `Cannot read release metadata: HTTP ${response.status}`);
+  }
   ensure(release.tag_name === tag, 'Release tag mismatch');
   for (const name of names) {
     const asset = release.assets.find((item) => item.name === name);
     const local = fs.readFileSync(path.join(directory, name));
     ensure(asset?.size === local.length && asset.state === 'uploaded', `Uploaded asset missing or size mismatch: ${name}`);
     const expectedUrl = `https://github.com/${repository}/releases/download/${tag}/${name}`;
-    ensure(decodeURI(asset.browser_download_url) === expectedUrl, `Unexpected artifact URL: ${name}`);
+    const isDraftUntagged = Boolean(release.draft && asset.browser_download_url?.includes('/releases/download/untagged-'));
+    ensure(decodeURI(asset.browser_download_url) === expectedUrl || isDraftUntagged, `Unexpected artifact URL: ${name}`);
     // Draft downloads require the assets API; never put the token into a URL or a log.
     const download = await fetch(`https://api.github.com/repos/${repository}/releases/assets/${asset.id}`, {
       headers: { ...headers, Accept: 'application/octet-stream' },
